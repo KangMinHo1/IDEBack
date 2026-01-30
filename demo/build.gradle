@@ -1,53 +1,53 @@
 plugins {
-	id 'java'
-	id 'org.springframework.boot' version '4.0.1'
-	id 'io.spring.dependency-management' version '1.1.7'
+    id 'java'
+    // [핵심 수정] 최신 Gradle(8.x~9.x)과 호환되는 최신 버전으로 업그레이드
+    id 'org.springframework.boot' version '3.3.2'
+    id 'io.spring.dependency-management' version '1.1.6'
 }
 
 group = 'com.myide'
 version = '0.0.1-SNAPSHOT'
-description = 'Demo project for Spring Boot'
 
 java {
-	toolchain {
-		languageVersion = JavaLanguageVersion.of(17)
-	}
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
 }
 
 repositories {
-	mavenCentral()
+    mavenCentral()
 }
 
 dependencies {
-	implementation 'org.springframework.boot:spring-boot-starter'
-	testImplementation 'org.springframework.boot:spring-boot-starter-test'
-	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
-
-    // 1. 기본 웹 & 톰캣 (API 서버)
+    // 1. 웹 & 소켓
     implementation 'org.springframework.boot:spring-boot-starter-web'
-
-    // 2. 실시간 통신 (Xterm.js 연동, 협업 모드 CRDT, 채팅용)
     implementation 'org.springframework.boot:spring-boot-starter-websocket'
 
-    // 3. Docker 제어 (샌드박스 실행용 - 핵심!)
-    implementation 'com.github.docker-java:docker-java:3.4.0'
-    implementation 'com.github.docker-java:docker-java-transport-httpclient5:3.4.0'
+    // 2. 유효성 검증
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+
+    // 3. 도커 제어 (Java 17 호환)
+    implementation 'com.github.docker-java:docker-java:3.3.4'
+    implementation 'com.github.docker-java:docker-java-transport-httpclient5:3.3.4'
     implementation 'org.apache.httpcomponents.client5:httpclient5:5.2.1'
 
-    // 4. 데이터베이스 & JPA (회원가입, 프로젝트 저장, 일정 관리)
+    // 4. 데이터베이스 & JPA
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
-    runtimeOnly 'com.h2database:h2' // 개발 단계에선 가벼운 H2 사용 (나중에 MySQL로 교체)
+    runtimeOnly 'com.h2database:h2'
 
-    // 5. 로그인 & 보안 (Social Login, GitHub/Google)
-    //implementation 'org.springframework.boot:spring-boot-starter-security'
-    //implementation 'org.springframework.boot:spring-boot-starter-oauth2-client'
-
-    // 6. 편의 도구
-    compileOnly 'org.projectlombok:lombok' // 코드 다이어트 (Getter/Setter 생략)
+    // 5. 롬복
+    compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
+
+    // 6. 테스트
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
+
+    // [런타임 에러 방지] JAXB 호환성 라이브러리 (그대로 유지)
+    implementation 'javax.xml.bind:jaxb-api:2.3.1'
+    implementation 'org.glassfish.jaxb:jaxb-runtime:2.3.1'
+    implementation 'javax.activation:activation:1.1.1'
 }
 
 tasks.named('test') {
-	useJUnitPlatform()
+    useJUnitPlatform()
 }

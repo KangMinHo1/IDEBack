@@ -1,5 +1,6 @@
-package com.myide.backend.common.config;
+package com.myide.backend.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.core.DefaultDockerClientConfig;
 import com.github.dockerjava.core.DockerClientImpl;
@@ -8,21 +9,33 @@ import com.github.dockerjava.transport.DockerHttpClient;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.time.Duration;
+
 @Configuration
 public class DockerConfig {
 
+    // 1. 도커 클라이언트 빈 등록 (DockerService에서 사용)
     @Bean
-    public DockerClient dockerClient(){
-        // 1. 도커 설정 자동 감지 (환경변수나 로컬 설정을 읽어옴)
+    public DockerClient dockerClient() {
+        // 호스트의 도커 환경변수 자동 감지 (Windows/Mac/Linux 대응)
         DefaultDockerClientConfig config = DefaultDockerClientConfig.createDefaultConfigBuilder().build();
 
-        // 2. 통신 방법 설정 (HTTP Client 사용)
+        // HTTP 클라이언트 설정 (타임아웃 등)
         DockerHttpClient httpClient = new ApacheDockerHttpClient.Builder()
                 .dockerHost(config.getDockerHost())
                 .sslConfig(config.getSSLConfig())
+                .maxConnections(100)
+                .connectionTimeout(Duration.ofSeconds(30))
+                .responseTimeout(Duration.ofSeconds(45))
                 .build();
 
-        // 3. 클라이언트 생성 및 반환
         return DockerClientImpl.getInstance(config, httpClient);
+    }
+
+    // 2. JSON 변환기 빈 등록 (WebSocket 핸들러에서 사용)
+    // 이전에 발생했던 ObjectMapper 오류 방지용
+    @Bean
+    public ObjectMapper objectMapper() {
+        return new ObjectMapper();
     }
 }
