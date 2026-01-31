@@ -31,27 +31,28 @@ public class DebugWebSocketHandler extends TextWebSocketHandler {
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
         JsonNode json = objectMapper.readTree(message.getPayload());
+        if (!json.has("type")) return;
         String type = json.get("type").asText();
 
         if ("START".equals(type)) {
-            String userId = json.get("userId").asText();
-            String projectName = json.get("projectName").asText();
-            JsonNode breakpointsNode = json.get("breakpoints");
+            String workspaceId = json.get("workspaceId").asText();
+            // [추가] filePath 받기
+            String filePath = json.has("filePath") ? json.get("filePath").asText() : "";
 
+            JsonNode breakpointsNode = json.get("breakpoints");
             List<Map<String, Object>> breakpoints = objectMapper.convertValue(
                     breakpointsNode,
                     new TypeReference<List<Map<String, Object>>>() {}
             );
 
-            debugService.startDebug(session, userId, projectName, breakpoints);
+            // [수정] filePath 전달
+            debugService.startDebug(session, workspaceId, filePath, breakpoints);
 
         } else if ("STOP".equals(type)) {
             debugService.stopDebug(session.getId());
-
-        } else if ("INPUT".equals(type)) { // [추가] 입력 처리
+        } else if ("INPUT".equals(type)) {
             String input = json.get("input").asText();
             debugService.input(session.getId(), input);
-
         } else {
             debugService.handleCommand(session.getId(), type);
         }
@@ -59,7 +60,6 @@ public class DebugWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) throws Exception {
-        log.info("🐛 Debug Session Closed: {}", session.getId());
         debugService.stopDebug(session.getId());
     }
 }

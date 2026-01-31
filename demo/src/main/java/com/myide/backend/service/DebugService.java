@@ -9,6 +9,7 @@ import com.sun.jdi.request.BreakpointRequest;
 import com.sun.jdi.request.ClassPrepareRequest;
 import com.sun.jdi.request.EventRequestManager;
 import com.sun.jdi.request.StepRequest;
+import com.myide.backend.domain.LanguageType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -29,24 +30,26 @@ public class DebugService {
     private final ObjectMapper objectMapper;
     private final DockerService dockerService;
 
+    // 디버깅 세션 관리
     private final Map<String, VirtualMachine> debugSessions = new ConcurrentHashMap<>();
     private final Map<String, WebSocketSession> webSocketSessions = new ConcurrentHashMap<>();
 
-    public void startDebug(WebSocketSession session, String userId, String projectName, List<Map<String, Object>> breakpoints) {
+    // [수정] filePath 인자 추가 -> DockerService로 전달
+    public void startDebug(WebSocketSession session, String workspaceId, String filePath, List<Map<String, Object>> breakpoints) {
         String sessionId = session.getId();
         webSocketSessions.put(sessionId, session);
 
         new Thread(() -> {
             try {
-                // 1. 도커 실행 및 포트 획득 (int 반환)
-                int assignedPort = dockerService.debugProject(session, userId, projectName, com.myide.backend.domain.LanguageType.JAVA, (logText) -> {
+                // 1. 도커 실행 (filePath 전달하여 해당 폴더에서 실행하게 함)
+                int assignedPort = dockerService.debugProject(session, workspaceId, filePath, LanguageType.JAVA, (logText) -> {
                     sendOutput(session, createMessage("OUTPUT", logText));
                 });
 
                 log.info("🎯 디버거 접속 시도: localhost:{}", assignedPort);
                 sendOutput(session, createMessage("OUTPUT", "[System] Waiting for JVM on port " + assignedPort + "..."));
 
-                // 2. JDI 연결 (획득한 포트로 접속)
+                // 2. JDI 연결
                 VirtualMachine vm = attachToRemoteJVM(sessionId, "localhost", String.valueOf(assignedPort));
                 debugSessions.put(sessionId, vm);
 
@@ -59,7 +62,7 @@ public class DebugService {
                 cpr.addClassFilter("Main");
                 cpr.enable();
 
-                // 4. 시작
+                // 4. 이벤트 루프 시작
                 vm.resume();
                 processEvents(vm, session, sessionId, breakpoints);
 
@@ -71,7 +74,6 @@ public class DebugService {
         }).start();
     }
 
-    // [추가] 입력 전달
     public void input(String sessionId, String input) {
         dockerService.writeToProcess(sessionId, input);
     }
@@ -79,7 +81,6 @@ public class DebugService {
     private void processEvents(VirtualMachine vm, WebSocketSession session, String sessionId, List<Map<String, Object>> breakpoints) {
         EventQueue eventQueue = vm.eventQueue();
         boolean running = true;
-
         while (running) {
             try {
                 EventSet eventSet = eventQueue.remove();
@@ -87,11 +88,9 @@ public class DebugService {
                     if (event instanceof ClassPrepareEvent) {
                         createBreakpoints(vm, (ClassPrepareEvent) event, breakpoints);
                         vm.resume();
-                    }
-                    else if (event instanceof BreakpointEvent || event instanceof StepEvent) {
+                    } else if (event instanceof BreakpointEvent || event instanceof StepEvent) {
                         LocatableEvent locatable = (LocatableEvent) event;
                         int lineNumber = locatable.location().lineNumber();
-
                         String sourcePath;
                         try { sourcePath = locatable.location().sourceName(); } catch (Exception e) { sourcePath = "Main.java"; }
 
@@ -104,8 +103,7 @@ public class DebugService {
                         suspendData.put("variables", getVariables(locatable.thread()));
 
                         sendOutput(session, objectMapper.writeValueAsString(suspendData));
-                    }
-                    else if (event instanceof VMDisconnectEvent || event instanceof VMDeathEvent) {
+                    } else if (event instanceof VMDisconnectEvent || event instanceof VMDeathEvent) {
                         running = false;
                         stopDebug(sessionId);
                     }
@@ -117,7 +115,6 @@ public class DebugService {
     private void createBreakpoints(VirtualMachine vm, ClassPrepareEvent event, List<Map<String, Object>> breakpoints) {
         ReferenceType refType = event.referenceType();
         EventRequestManager erm = vm.eventRequestManager();
-
         for (Map<String, Object> bp : breakpoints) {
             int line = (Integer) bp.get("line");
             try {
@@ -139,26 +136,10 @@ public class DebugService {
 
             switch (command) {
                 case "STEP_OVER":
-                    vm.allThreads().stream().filter(t -> t.name().equals("main")).findFirst().ifPresent(thread -> {
-                        StepRequest step = erm.createStepRequest(thread, StepRequest.STEP_LINE, StepRequest.STEP_OVER);
-                        step.addCountFilter(1);
-                        step.addClassExclusionFilter("java.*");
-                        step.addClassExclusionFilter("javax.*");
-                        step.addClassExclusionFilter("sun.*");
-                        step.enable();
-                    });
-                    vm.resume();
+                    requestStep(vm, erm, StepRequest.STEP_OVER);
                     break;
                 case "STEP_INTO":
-                    vm.allThreads().stream().filter(t -> t.name().equals("main")).findFirst().ifPresent(thread -> {
-                        StepRequest step = erm.createStepRequest(thread, StepRequest.STEP_LINE, StepRequest.STEP_INTO);
-                        step.addCountFilter(1);
-                        step.addClassExclusionFilter("java.*");
-                        step.addClassExclusionFilter("javax.*");
-                        step.addClassExclusionFilter("sun.*");
-                        step.enable();
-                    });
-                    vm.resume();
+                    requestStep(vm, erm, StepRequest.STEP_INTO);
                     break;
                 case "CONTINUE":
                     vm.resume();
@@ -167,7 +148,21 @@ public class DebugService {
                     stopDebug(sessionId);
                     break;
             }
-        } catch (Exception e) {}
+        } catch (Exception e) {
+            log.error("Debug command failed", e);
+        }
+    }
+
+    private void requestStep(VirtualMachine vm, EventRequestManager erm, int depth) {
+        vm.allThreads().stream().filter(t -> t.name().equals("main")).findFirst().ifPresent(thread -> {
+            StepRequest step = erm.createStepRequest(thread, StepRequest.STEP_LINE, depth);
+            step.addCountFilter(1);
+            step.addClassExclusionFilter("java.*");
+            step.addClassExclusionFilter("javax.*");
+            step.addClassExclusionFilter("sun.*");
+            step.enable();
+        });
+        vm.resume();
     }
 
     public void stopDebug(String sessionId) {
@@ -207,9 +202,11 @@ public class DebugService {
                 .filter(c -> c.name().equals("com.sun.jdi.SocketAttach"))
                 .findFirst()
                 .orElseThrow(() -> new RuntimeException("SocketAttach connector not found"));
+
         Map<String, Connector.Argument> params = conn.defaultArguments();
         params.get("hostname").setValue(host);
-        params.get("port").setValue(port); // [수정] 동적 포트 연결
+        params.get("port").setValue(port);
+
         for(int i=0; i<60; i++) {
             if (!dockerService.isContainerAlive(sessionId)) throw new RuntimeException("Container died");
             try { return conn.attach(params); } catch(IOException e) { Thread.sleep(1000); }

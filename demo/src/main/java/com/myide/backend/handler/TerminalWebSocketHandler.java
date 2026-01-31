@@ -20,27 +20,36 @@ public class TerminalWebSocketHandler extends TextWebSocketHandler {
     private final ObjectMapper objectMapper;
 
     @Override
+    public void afterConnectionEstablished(WebSocketSession session) throws Exception {
+        log.info("💻 Terminal Connected: {}", session.getId());
+    }
+
+    @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
-        // 메시지 구조: { "type": "INIT" or "INPUT", "command": "ls -al", ... }
-        JsonNode json = objectMapper.readTree(message.getPayload());
-        String type = json.get("type").asText();
+        try {
+            // 1. JSON 파싱
+            JsonNode json = objectMapper.readTree(message.getPayload());
+            String type = json.get("type").asText();
 
-        if ("INIT".equals(type)) {
-            // 터미널 초기화 요청
-            String userId = json.get("userId").asText();
-            String projectName = json.get("projectName").asText();
-            dockerService.createTerminal(session, userId, projectName);
-
-        } else if ("INPUT".equals(type)) {
-            // 키보드 입력
-            String command = json.get("command").asText();
-            dockerService.writeToTerminal(session.getId(), command);
+            if ("START".equals(type) || "INIT".equals(type)) { // Terminal.jsx가 INIT이나 START를 보낼 수 있음
+                String workspaceId = json.has("workspaceId") ? json.get("workspaceId").asText() : json.get("projectName").asText();
+                dockerService.createTerminal(session, workspaceId);
+            }
+            else if ("INPUT".equals(type)) {
+                // 2. 명령어 추출 (JSON 껍데기 벗기기)
+                String command = json.get("command").asText();
+                // 3. 실제 명령어만 도커로 전송
+                dockerService.writeToTerminal(session.getId(), command);
+            }
+        } catch (Exception e) {
+            log.error("Terminal JSON Parse Error: {}", e.getMessage());
+            // 파싱 실패 시, 쉘에 쓰레기 값을 입력하지 않고 무시함
         }
     }
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) throws Exception {
-        // 소켓 끊기면 터미널 컨테이너도 삭제
         dockerService.closeTerminal(session.getId());
+        log.info("💻 Terminal Closed: {}", session.getId());
     }
 }
