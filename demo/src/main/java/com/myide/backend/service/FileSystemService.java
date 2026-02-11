@@ -1,12 +1,15 @@
 package com.myide.backend.service;
 
+import com.myide.backend.domain.LanguageType;
+import com.myide.backend.domain.Project;
 import com.myide.backend.domain.Workspace;
-import com.myide.backend.dto.FileNode;
-import com.myide.backend.dto.WorkspaceRequest;
+import com.myide.backend.dto.*;
+import com.myide.backend.repository.ProjectRepository;
 import com.myide.backend.repository.WorkspaceRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.FileSystemUtils;
 
 import java.io.IOException;
@@ -21,20 +24,53 @@ import java.util.stream.Stream;
 @RequiredArgsConstructor
 public class FileSystemService {
 
-    private static final String ROOT_PATH = "C:\\WebIDE\\workspaces";
+    private static final String DEFAULT_ROOT = "C:\\WebIDE\\workspaces";
+
     private final WorkspaceRepository workspaceRepository;
-
-    // [중요] DockerService 주입
+    private final ProjectRepository projectRepository;
     private final DockerService dockerService;
+    private final GitService gitService;
 
-    public Workspace createWorkspace(String userId, String name) {
+    // 경로 계산 로직
+    private Path calculatePath(String workspaceId, String projectName, String branchName) {
+        Workspace workspace = workspaceRepository.findById(workspaceId)
+                .orElseThrow(() -> new RuntimeException("워크스페이스를 찾을 수 없습니다: " + workspaceId));
+
+        // [중요] activeBranch가 null/blank/"main" 이면 무조건 main-repo 폴더 사용
+        String realBranchFolder = (branchName == null || branchName.isBlank() ||
+                "main-repo".equals(branchName) || "main".equals(branchName))
+                ? "main-repo" : branchName;
+
+        return Paths.get(workspace.getPath(), projectName, realBranchFolder);
+    }
+
+    // [수정] 워크스페이스 생성 (이름 기반 폴더 생성)
+    public Workspace createWorkspace(String userId, String name, String customPath) {
         String uuid = UUID.randomUUID().toString();
-        Path path = Paths.get(ROOT_PATH, uuid);
+        Path rootPath;
+
+        // 1. 사용자 지정 경로가 있으면 사용, 없으면 기본 경로 + "워크스페이스 이름"
+        if (customPath != null && !customPath.isBlank()) {
+            rootPath = Paths.get(customPath, name);
+        } else {
+            rootPath = Paths.get(DEFAULT_ROOT, name); // [변경] uuid -> name
+        }
+
         try {
-            Files.createDirectories(path);
-            Workspace workspace = Workspace.builder().uuid(uuid).name(name).ownerId(userId).build();
-            return workspaceRepository.save(workspace);
-        } catch (IOException e) { throw new RuntimeException(e); }
+            // 중복 이름 체크
+            if (Files.exists(rootPath)) {
+                throw new RuntimeException("이미 존재하는 워크스페이스 폴더입니다: " + name);
+            }
+
+            Files.createDirectories(rootPath);
+
+            return workspaceRepository.save(Workspace.builder()
+                    .uuid(uuid)
+                    .name(name)
+                    .ownerId(userId)
+                    .path(rootPath.toAbsolutePath().toString()) // 실제 생성된 경로 저장
+                    .build());
+        } catch (IOException e) { throw new RuntimeException("워크스페이스 폴더 생성 실패: " + e.getMessage()); }
     }
 
     public List<Workspace> getMyWorkspaces(String userId) {
@@ -43,94 +79,187 @@ public class FileSystemService {
                 .collect(Collectors.toList());
     }
 
-    public void createNewProject(WorkspaceRequest request) {
-        Path projectPath = Paths.get(ROOT_PATH, request.getWorkspaceId(), request.getName());
+    // 프로젝트 목록 조회 (DB 정보 병합)
+    @Transactional(readOnly = true)
+    public FileNode getProjectList(String workspaceId) {
+        Workspace workspace = workspaceRepository.findById(workspaceId)
+                .orElseThrow(() -> new RuntimeException("Workspace not found"));
+
+        Map<String, String> dbProjectMap = workspace.getProjects().stream()
+                .collect(Collectors.toMap(
+                        Project::getName,
+                        p -> p.getGitUrl() != null ? p.getGitUrl() : "",
+                        (existing, replacement) -> existing
+                ));
+
+        Path workspaceRoot = Paths.get(workspace.getPath());
+        FileNode rootNode = FileNode.builder().id("root").name("Projects").type("folder").build();
+
+        if (!Files.exists(workspaceRoot)) return rootNode;
+
+        try (Stream<Path> stream = Files.list(workspaceRoot)) {
+            List<FileNode> projects = stream
+                    .filter(Files::isDirectory)
+                    .filter(path -> !path.getFileName().toString().startsWith("."))
+                    .filter(path -> !path.getFileName().toString().equals("temp"))
+                    .map(path -> {
+                        String pName = path.getFileName().toString();
+                        String gitUrl = dbProjectMap.getOrDefault(pName, null);
+                        return FileNode.builder().id(pName).name(pName).type("project").gitUrl(gitUrl).build();
+                    })
+                    .collect(Collectors.toList());
+            rootNode.setChildren(projects);
+        } catch (IOException e) {
+            rootNode.setChildren(Collections.emptyList());
+        }
+        return rootNode;
+    }
+
+    // 프로젝트 생성
+    public void createNewProject(CreateProjectRequest request) {
+        Workspace workspace = workspaceRepository.findById(request.getWorkspaceId())
+                .orElseThrow(() -> new RuntimeException("Workspace not found"));
+
+        Path projectRoot = Paths.get(workspace.getPath(), request.getProjectName());
+        Path mainRepoPath = projectRoot.resolve("main-repo");
+
         try {
-            if (Files.exists(projectPath)) throw new RuntimeException("이미 존재하는 프로젝트 이름입니다.");
-            Files.createDirectories(projectPath);
+            if (Files.exists(projectRoot)) throw new RuntimeException("이미 존재하는 프로젝트입니다.");
+            Files.createDirectories(mainRepoPath);
 
-            String fileName;
-            String content;
-            String lang = request.getLanguage().toUpperCase();
+            createTemplateFiles(mainRepoPath, request.getLanguage());
+            gitService.createRepository(mainRepoPath);
 
-            switch (lang) {
-                case "JAVA":
-                    fileName = "Main.java";
-                    content = "public class Main {\n    public static void main(String[] args) {\n        System.out.println(\"Hello Java!\");\n    }\n}";
-                    break;
-                case "PYTHON":
-                    fileName = "main.py";
-                    content = "print('Hello Python!')";
-                    break;
-                case "C":
-                    fileName = "main.c";
-                    content = "#include <stdio.h>\n\nint main() {\n    printf(\"Hello C!\\n\");\n    return 0;\n}";
-                    break;
-                case "CPP":
-                    fileName = "main.cpp";
-                    content = "#include <iostream>\n\nint main() {\n    std::cout << \"Hello C++!\" << std::endl;\n    return 0;\n}";
-                    break;
-                case "CSHARP":
-                    fileName = "Program.cs";
-                    content = "using System;\n\nclass Program {\n    static void Main() {\n        Console.WriteLine(\"Hello C#!\");\n    }\n}";
-                    String csprojContent = "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <OutputType>Exe</OutputType>\n    <TargetFramework>net8.0</TargetFramework>\n  </PropertyGroup>\n</Project>";
-                    Files.writeString(projectPath.resolve(request.getName() + ".csproj"), csprojContent);
-                    break;
-                case "JAVASCRIPT":
-                    fileName = "app.js";
-                    content = "console.log('Hello JavaScript!');";
-                    break;
-                case "HTML":
-                    fileName = "index.html";
-                    content = "<!DOCTYPE html>\n<html>\n<body>\n    <h1>Hello HTML!</h1>\n</body>\n</html>";
-                    break;
-                default:
-                    fileName = "README.txt";
-                    content = "Project Created.";
+            if (request.getGitUrl() != null && !request.getGitUrl().isBlank()) {
+                gitService.addRemote(mainRepoPath, request.getGitUrl());
             }
-            Files.writeString(projectPath.resolve(fileName), content);
+
+            Project project = Project.builder()
+                    .name(request.getProjectName())
+                    .description(request.getDescription())
+                    .language(request.getLanguage())
+                    .gitUrl(request.getGitUrl())
+                    .workspace(workspace)
+                    .build();
+
+            projectRepository.save(project);
 
         } catch (IOException e) {
             throw new RuntimeException("프로젝트 생성 실패: " + e.getMessage());
         }
     }
 
-    public void createFile(WorkspaceRequest request) {
-        Path path = Paths.get(ROOT_PATH, request.getWorkspaceId(), request.getFilePath());
-        try {
-            if (Files.exists(path)) throw new RuntimeException("이미 존재하는 파일입니다.");
+    // Git URL 업데이트
+    @Transactional
+    public void updateProjectGitUrl(String workspaceId, String projectName, String gitUrl) {
+        Workspace workspace = workspaceRepository.findById(workspaceId)
+                .orElseThrow(() -> new RuntimeException("Workspace not found"));
 
-            // 폴더 생성 로직 추가
-            if ("folder".equalsIgnoreCase(request.getType())) {
-                Files.createDirectories(path);
-            } else {
-                Files.createDirectories(path.getParent());
-                Files.createFile(path);
-            }
-        } catch (IOException e) { throw new RuntimeException(e); }
-    }
+        Project project = projectRepository.findAll().stream()
+                .filter(p -> p.getWorkspace().getUuid().equals(workspaceId) && p.getName().equals(projectName))
+                .findFirst()
+                .orElseThrow(() -> new RuntimeException("Project not found: " + projectName));
 
-    public void saveFile(WorkspaceRequest request) {
-        Path path = Paths.get(ROOT_PATH, request.getWorkspaceId(), request.getFilePath());
+        Project updatedProject = new Project(
+                project.getId(), project.getName(), project.getDescription(),
+                project.getLanguage(), gitUrl, project.getWorkspace()
+        );
+        projectRepository.save(updatedProject);
+
+        Path projectRoot = Paths.get(workspace.getPath(), projectName);
+        Path mainRepoPath = projectRoot.resolve("main-repo");
+
         try {
-            if (!Files.exists(path)) {
-                Files.createDirectories(path.getParent());
-            }
-            Files.writeString(path, request.getCode(), StandardCharsets.UTF_8);
-        } catch (NoSuchFileException e) {
-            log.error("파일 저장 실패 (경로 없음): {}", path);
-            throw new RuntimeException("파일 경로를 찾을 수 없습니다: " + request.getFilePath());
-        } catch (IOException e) {
-            log.error("파일 저장 실패", e);
-            throw new RuntimeException("파일 저장 실패: " + e.getMessage());
+            gitService.addRemote(mainRepoPath, gitUrl);
+        } catch (Exception e) {
+            throw new RuntimeException("Git Remote 연결 실패: " + e.getMessage());
         }
     }
 
-    public FileNode getFileTree(String workspaceId) {
-        Path root = Paths.get(ROOT_PATH, workspaceId);
-        if (!Files.exists(root)) throw new RuntimeException("워크스페이스를 찾을 수 없습니다.");
-        String workspaceName = workspaceRepository.findById(workspaceId).map(Workspace::getName).orElse("Unknown Workspace");
-        return traverseDirectory(root, root, workspaceName);
+    public void createBranch(FileRequest request) {
+        Workspace workspace = workspaceRepository.findById(request.getWorkspaceId())
+                .orElseThrow(() -> new RuntimeException("Workspace not found"));
+
+        Path projectRoot = Paths.get(workspace.getPath(), request.getProjectName());
+        Path mainRepoPath = projectRoot.resolve("main-repo");
+        Path worktreePath = projectRoot.resolve(request.getBranchName());
+
+        if (!Files.exists(mainRepoPath)) throw new RuntimeException("메인 저장소를 찾을 수 없습니다.");
+        if (Files.exists(worktreePath)) throw new RuntimeException("이미 존재하는 브랜치입니다.");
+
+        gitService.createWorktree(mainRepoPath, worktreePath, request.getBranchName());
+    }
+
+    public FileNode getFileTree(String workspaceId, String projectName, String branchName) {
+        Path targetDir = calculatePath(workspaceId, projectName, branchName);
+        if (!Files.exists(targetDir)) return FileNode.builder().id(projectName).name(projectName).type("project").build();
+        return traverseDirectory(targetDir, targetDir, projectName);
+    }
+
+    public String getFileContent(String workspaceId, String projectName, String branchName, String filePath) {
+        Path target = calculatePath(workspaceId, projectName, branchName).resolve(filePath);
+        try { return Files.readString(target, StandardCharsets.UTF_8); } catch (IOException e) { throw new RuntimeException(e); }
+    }
+
+    public void createFile(FileRequest request) {
+        Path root = calculatePath(request.getWorkspaceId(), request.getProjectName(), request.getBranchName());
+        Path target = root.resolve(request.getFilePath());
+        try {
+            if ("folder".equalsIgnoreCase(request.getType())) Files.createDirectories(target);
+            else {
+                if(target.getParent() != null) Files.createDirectories(target.getParent());
+                Files.createFile(target);
+            }
+        } catch (IOException e) { throw new RuntimeException("파일 생성 실패: " + e.getMessage()); }
+    }
+
+    public void saveFile(FileRequest request) {
+        Path root = calculatePath(request.getWorkspaceId(), request.getProjectName(), request.getBranchName());
+        Path target = root.resolve(request.getFilePath());
+        try {
+            if (target.getParent() != null && !Files.exists(target.getParent())) Files.createDirectories(target.getParent());
+            Files.writeString(target, request.getCode(), StandardCharsets.UTF_8);
+        } catch (IOException e) { throw new RuntimeException("파일 저장 실패: " + e.getMessage()); }
+    }
+
+    public void deleteFile(FileRequest request) {
+        Path target = calculatePath(request.getWorkspaceId(), request.getProjectName(), request.getBranchName()).resolve(request.getFilePath());
+        try { FileSystemUtils.deleteRecursively(target); } catch (IOException e) { throw new RuntimeException("삭제 실패", e); }
+    }
+
+    public void renameFile(FileRequest request) {
+        Path root = calculatePath(request.getWorkspaceId(), request.getProjectName(), request.getBranchName());
+        Path oldPath = root.resolve(request.getFilePath());
+        Path newPath = oldPath.getParent().resolve(request.getNewName());
+        try { Files.move(oldPath, newPath, StandardCopyOption.REPLACE_EXISTING); } catch (IOException e) { throw new RuntimeException("이름 변경 실패", e); }
+    }
+
+    public String buildProject(BuildRequest request) {
+        Workspace workspace = workspaceRepository.findById(request.getWorkspaceId())
+                .orElseThrow(() -> new RuntimeException("Workspace not found"));
+
+        String projectName = request.getProjectName();
+        String branchFolder = (request.getBranchName() == null || request.getBranchName().isEmpty() || "main".equals(request.getBranchName()))
+                ? "main-repo" : request.getBranchName();
+        String outputFileName = projectName + ".jar";
+
+        String cmd = String.format("cd %s/%s && javac -encoding UTF-8 *.java && jar cfe %s Main *.class", projectName, branchFolder, outputFileName);
+        String containerFilePath = "/app/" + projectName + "/" + branchFolder + "/" + outputFileName;
+
+        Path tempDir = Paths.get(workspace.getPath(), ".temp");
+        try { if (!Files.exists(tempDir)) Files.createDirectories(tempDir); } catch(IOException e){}
+        String hostFilePath = tempDir.resolve(outputFileName).toString();
+
+        dockerService.buildAndCopy(request.getWorkspaceId(), cmd, containerFilePath, hostFilePath);
+        return hostFilePath;
+    }
+
+    private void createTemplateFiles(Path path, LanguageType lang) throws IOException {
+        String fileName = "README.txt";
+        String content = "Project Created.";
+        if (lang == LanguageType.JAVA) { fileName = "Main.java"; content = "public class Main {\n    public static void main(String[] args) {\n        System.out.println(\"Hello Java!\");\n    }\n}"; }
+        else if (lang == LanguageType.PYTHON) { fileName = "main.py"; content = "print('Hello Python!')"; }
+        Files.writeString(path.resolve(fileName), content);
     }
 
     private FileNode traverseDirectory(Path dir, Path rootDir, String rootName) {
@@ -139,74 +268,14 @@ public class FileSystemService {
         String id = relativePath.isEmpty() ? "root" : relativePath;
         FileNode node = FileNode.builder().id(id).name(displayName).type("folder").build();
         try (Stream<Path> stream = Files.list(dir)) {
-            List<FileNode> children = stream.map(path -> {
-                if (Files.isDirectory(path)) return traverseDirectory(path, rootDir, null);
-                else return FileNode.builder().id(rootDir.relativize(path).toString().replace("\\", "/")).name(path.getFileName().toString()).type("file").build();
-            }).collect(Collectors.toList());
+            List<FileNode> children = stream
+                    .filter(path -> !path.getFileName().toString().equals(".git"))
+                    .map(path -> {
+                        if (Files.isDirectory(path)) return traverseDirectory(path, rootDir, null);
+                        else return FileNode.builder().id(rootDir.relativize(path).toString().replace("\\", "/")).name(path.getFileName().toString()).type("file").build();
+                    }).collect(Collectors.toList());
             node.setChildren(children);
         } catch (IOException e) { node.setChildren(Collections.emptyList()); }
         return node;
-    }
-
-    public String getFileContent(String workspaceId, String filePath) {
-        Path path = Paths.get(ROOT_PATH, workspaceId, filePath);
-        try { return Files.readString(path, StandardCharsets.UTF_8); } catch (IOException e) { throw new RuntimeException(e); }
-    }
-
-    public void deleteFile(WorkspaceRequest request) {
-        if ("root".equals(request.getFilePath())) { deleteWorkspace(request.getWorkspaceId()); return; }
-        Path path = Paths.get(ROOT_PATH, request.getWorkspaceId(), request.getFilePath());
-        try { FileSystemUtils.deleteRecursively(path); } catch (IOException e) { throw new RuntimeException(e); }
-    }
-
-    private void deleteWorkspace(String workspaceId) {
-        Path path = Paths.get(ROOT_PATH, workspaceId);
-        try { FileSystemUtils.deleteRecursively(path); workspaceRepository.deleteById(workspaceId); } catch (IOException e) { throw new RuntimeException(e); }
-    }
-
-    public void renameFile(WorkspaceRequest request, String newName) {
-        if ("root".equals(request.getFilePath())) {
-            Workspace ws = workspaceRepository.findById(request.getWorkspaceId()).orElseThrow();
-            Workspace newWs = new Workspace(ws.getUuid(), newName, ws.getOwnerId(), ws.getDescription());
-            workspaceRepository.save(newWs);
-            return;
-        }
-        Path oldPath = Paths.get(ROOT_PATH, request.getWorkspaceId(), request.getFilePath());
-        Path newPath = oldPath.getParent().resolve(newName);
-        try { Files.move(oldPath, newPath, StandardCopyOption.REPLACE_EXISTING); } catch (IOException e) { throw new RuntimeException(e); }
-    }
-
-    // [신규] 빌드 로직
-    public String buildProject(WorkspaceRequest request) {
-        String workspaceId = request.getWorkspaceId();
-        String projectName = request.getName();
-        String language = request.getLanguage();
-
-        String cmd = "";
-        String outputFileName = "";
-
-        if ("JAVA".equalsIgnoreCase(language)) {
-            outputFileName = projectName + ".jar";
-            cmd = String.format(
-                    "cd %s && javac -encoding UTF-8 *.java && jar cfe %s Main *.class",
-                    projectName, outputFileName
-            );
-        } else {
-            throw new IllegalArgumentException("현재는 Java 빌드만 지원합니다.");
-        }
-
-        // 결과 파일의 컨테이너 내부 경로 (예: /app/my-java-app/my-java-app.jar)
-        String containerFilePath = "/app/" + projectName + "/" + outputFileName;
-
-        // 호스트 임시 저장 경로
-        Path tempDir = Paths.get(ROOT_PATH, "temp");
-        try { if (!Files.exists(tempDir)) Files.createDirectories(tempDir); } catch(IOException e){}
-
-        String hostFilePath = tempDir.resolve(outputFileName).toString();
-
-        // [핵심] DockerService의 통합 메서드 호출
-        dockerService.buildAndCopy(workspaceId, cmd, containerFilePath, hostFilePath);
-
-        return hostFilePath;
     }
 }

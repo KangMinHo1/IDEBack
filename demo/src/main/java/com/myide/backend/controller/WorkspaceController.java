@@ -23,11 +23,13 @@ public class WorkspaceController {
         return ResponseEntity.ok(fileSystemService.getMyWorkspaces(userId));
     }
 
-    // 워크스페이스 생성
+    // 워크스페이스 생성 (path 파라미터 수신)
     @PostMapping
     public ResponseEntity<Workspace> createWorkspace(@RequestBody Map<String, String> body) {
         String userId = body.get("userId");
         String name = body.get("name");
-        return ResponseEntity.ok(fileSystemService.createWorkspace(userId, name));
+        String path = body.get("path"); // [New] 경로 정보 (없으면 null)
+
+        return ResponseEntity.ok(fileSystemService.createWorkspace(userId, name, path));
     }
 }

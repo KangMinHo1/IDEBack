@@ -35,14 +35,14 @@ public class DebugService {
     private final Map<String, WebSocketSession> webSocketSessions = new ConcurrentHashMap<>();
 
     // [수정] filePath 인자 추가 -> DockerService로 전달
-    public void startDebug(WebSocketSession session, String workspaceId, String filePath, List<Map<String, Object>> breakpoints) {
+    public void startDebug(WebSocketSession session, String workspaceId, String projectName, String branchName, String filePath, List<Map<String, Object>> breakpoints) {
         String sessionId = session.getId();
         webSocketSessions.put(sessionId, session);
 
         new Thread(() -> {
             try {
                 // 1. 도커 실행 (filePath 전달하여 해당 폴더에서 실행하게 함)
-                int assignedPort = dockerService.debugProject(session, workspaceId, filePath, LanguageType.JAVA, (logText) -> {
+                int assignedPort = dockerService.debugProject(session, workspaceId, projectName, branchName, filePath, LanguageType.JAVA, (logText) -> {
                     sendOutput(session, createMessage("OUTPUT", logText));
                 });
 

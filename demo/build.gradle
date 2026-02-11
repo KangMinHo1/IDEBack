@@ -48,6 +48,13 @@ dependencies {
     implementation 'javax.activation:activation:1.1.1'
 
     implementation 'org.apache.commons:commons-compress:1.26.0' // [필수] 도커 파일 복사용
+
+    // [New] Git 기능 제어 (JGit)
+    implementation 'org.eclipse.jgit:org.eclipse.jgit:6.5.0.202303070854-r'
+
+
+
+
 }
 
 tasks.named('test') {

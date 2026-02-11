@@ -21,36 +21,32 @@ public class RunWebSocketHandler extends TextWebSocketHandler {
     private final ObjectMapper objectMapper;
 
     @Override
-    public void afterConnectionEstablished(WebSocketSession session) throws Exception {
-        log.info("🚀 Run Session Connected: {}", session.getId());
-    }
-
-    @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
         JsonNode json = objectMapper.readTree(message.getPayload());
-
         String type = json.has("type") ? json.get("type").asText() : "RUN";
 
         if ("STOP".equals(type)) {
             dockerService.stopContainer(session.getId());
             return;
         }
-
         if ("INPUT".equals(type)) {
             String input = json.get("input").asText();
             dockerService.writeToProcess(session.getId(), input);
             return;
         }
 
+        // [수정] 필수 파라미터 3종 세트 수신
         String workspaceId = json.get("workspaceId").asText();
-        // [수정] 파일 경로 받기
-        String filePath = json.has("filePath") ? json.get("filePath").asText() : "";
-        String languageStr = json.get("language").asText();
-        LanguageType language = LanguageType.valueOf(languageStr.toUpperCase());
+        String projectName = json.get("projectName").asText(); // 필수
+        String branchName = json.has("branchName") ? json.get("branchName").asText() : "main-repo"; // 선택
 
-        log.info("🚀 실행 요청: WS={}, Path={}, Lang={}", workspaceId, filePath, language);
-        // [수정] filePath 전달
-        dockerService.runProject(session, workspaceId, filePath, language);
+        String filePath = json.has("filePath") ? json.get("filePath").asText() : "";
+        LanguageType language = LanguageType.valueOf(json.get("language").asText().toUpperCase());
+
+        log.info("🚀 Run Request: Proj={}, Branch={}", projectName, branchName);
+
+        // DockerService 호출 시 파라미터 추가됨
+        dockerService.runProject(session, workspaceId, projectName, branchName, filePath, language);
     }
 
     @Override

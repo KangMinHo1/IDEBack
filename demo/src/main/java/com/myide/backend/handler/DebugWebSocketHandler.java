@@ -24,11 +24,6 @@ public class DebugWebSocketHandler extends TextWebSocketHandler {
     private final ObjectMapper objectMapper;
 
     @Override
-    public void afterConnectionEstablished(WebSocketSession session) throws Exception {
-        log.info("🐛 Debug Session Connected: {}", session.getId());
-    }
-
-    @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
         JsonNode json = objectMapper.readTree(message.getPayload());
         if (!json.has("type")) return;
@@ -36,7 +31,8 @@ public class DebugWebSocketHandler extends TextWebSocketHandler {
 
         if ("START".equals(type)) {
             String workspaceId = json.get("workspaceId").asText();
-            // [추가] filePath 받기
+            String projectName = json.get("projectName").asText(); // [New]
+            String branchName = json.has("branchName") ? json.get("branchName").asText() : "main-repo"; // [New]
             String filePath = json.has("filePath") ? json.get("filePath").asText() : "";
 
             JsonNode breakpointsNode = json.get("breakpoints");
@@ -45,8 +41,9 @@ public class DebugWebSocketHandler extends TextWebSocketHandler {
                     new TypeReference<List<Map<String, Object>>>() {}
             );
 
-            // [수정] filePath 전달
-            debugService.startDebug(session, workspaceId, filePath, breakpoints);
+            // DebugService에도 projectName, branchName 전달 필요!
+            // (DebugService의 startDebug 메서드 시그니처도 수정해야 합니다 -> 아래 설명 참고)
+            debugService.startDebug(session, workspaceId, projectName, branchName, filePath, breakpoints);
 
         } else if ("STOP".equals(type)) {
             debugService.stopDebug(session.getId());

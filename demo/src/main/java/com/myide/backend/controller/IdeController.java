@@ -1,11 +1,8 @@
 package com.myide.backend.controller;
 
-import com.myide.backend.domain.Workspace;
-import com.myide.backend.dto.FileNode;
-import com.myide.backend.dto.WorkspaceRequest;
+import com.myide.backend.dto.*;
 import com.myide.backend.service.FileSystemService;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
 import org.springframework.http.HttpHeaders;
@@ -16,9 +13,8 @@ import org.springframework.web.bind.annotation.*;
 import java.net.MalformedURLException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.List;
+import java.util.Map;
 
-@Slf4j
 @RestController
 @RequestMapping("/api/workspaces")
 @RequiredArgsConstructor
@@ -27,81 +23,101 @@ public class IdeController {
 
     private final FileSystemService fileSystemService;
 
+    // 0. 워크스페이스 내 프로젝트 목록 조회
+    @GetMapping("/{workspaceId}/projects")
+    public ResponseEntity<FileNode> getProjects(@PathVariable String workspaceId) {
+        return ResponseEntity.ok(fileSystemService.getProjectList(workspaceId));
+    }
 
-    // 3. 파일 트리 조회
+    // 1. 파일 트리 조회
     @GetMapping("/{workspaceId}/files")
-    public ResponseEntity<FileNode> getFiles(@PathVariable String workspaceId) {
-        return ResponseEntity.ok(fileSystemService.getFileTree(workspaceId));
+    public ResponseEntity<FileNode> getFiles(
+            @PathVariable String workspaceId,
+            @RequestParam String projectName,
+            @RequestParam(required = false, defaultValue = "main-repo") String branchName
+    ) {
+        return ResponseEntity.ok(fileSystemService.getFileTree(workspaceId, projectName, branchName));
     }
 
-    // 4. 파일 내용 조회
+    // 2. 파일 내용 조회
     @GetMapping("/{workspaceId}/file")
-    public ResponseEntity<String> getFile(@PathVariable String workspaceId, @RequestParam String path) {
-        return ResponseEntity.ok(fileSystemService.getFileContent(workspaceId, path));
+    public ResponseEntity<String> getFile(
+            @PathVariable String workspaceId,
+            @RequestParam String projectName,
+            @RequestParam(required = false, defaultValue = "main-repo") String branchName,
+            @RequestParam String path
+    ) {
+        return ResponseEntity.ok(fileSystemService.getFileContent(workspaceId, projectName, branchName, path));
     }
 
-    // 5. 프로젝트(폴더) 생성
-    @PostMapping("/files/project")
-    public ResponseEntity<String> createProject(@RequestBody WorkspaceRequest request) {
+    // 3. 프로젝트 생성
+    @PostMapping("/project")
+    public ResponseEntity<String> createProject(@RequestBody CreateProjectRequest request) {
         fileSystemService.createNewProject(request);
         return ResponseEntity.ok("프로젝트 생성됨");
     }
 
-    // 6. 파일/폴더 생성
+    // [New] Git URL 업데이트 (연동하기)
+    // URL: POST /api/workspaces/project/git-url
+    @PostMapping("/project/git-url")
+    public ResponseEntity<String> updateGitUrl(@RequestBody Map<String, String> body) {
+        String workspaceId = body.get("workspaceId");
+        String projectName = body.get("projectName");
+        String gitUrl = body.get("gitUrl");
+
+        fileSystemService.updateProjectGitUrl(workspaceId, projectName, gitUrl);
+        return ResponseEntity.ok("Git URL 업데이트 완료");
+    }
+
+    // 4. 브랜치 생성
+    @PostMapping("/branches")
+    public ResponseEntity<String> createBranch(@RequestBody FileRequest request) {
+        fileSystemService.createBranch(request);
+        return ResponseEntity.ok("브랜치 생성됨");
+    }
+
+    // 5. 파일 생성
     @PostMapping("/files")
-    public ResponseEntity<String> createFile(@RequestBody WorkspaceRequest request) {
+    public ResponseEntity<String> createFile(@RequestBody FileRequest request) {
         fileSystemService.createFile(request);
         return ResponseEntity.ok("생성됨");
     }
 
-    // 7. 파일 저장
+    // 6. 파일 저장
     @PostMapping("/save")
-    public ResponseEntity<String> saveFile(@RequestBody WorkspaceRequest request) {
+    public ResponseEntity<String> saveFile(@RequestBody FileRequest request) {
         fileSystemService.saveFile(request);
         return ResponseEntity.ok("저장됨");
     }
 
-    // 8. 파일 삭제
+    // 7. 파일 삭제
     @DeleteMapping("/files")
-    public ResponseEntity<String> deleteFile(@RequestParam String workspaceId, @RequestParam String path) {
-        WorkspaceRequest req = new WorkspaceRequest();
-        req.setWorkspaceId(workspaceId);
-        req.setFilePath(path);
-        fileSystemService.deleteFile(req);
+    public ResponseEntity<String> deleteFile(@RequestBody FileRequest request) {
+        fileSystemService.deleteFile(request);
         return ResponseEntity.ok("삭제됨");
     }
 
-    // 9. 이름 변경
+    // 8. 이름 변경
     @PutMapping("/files/rename")
-    public ResponseEntity<String> renameFile(@RequestBody WorkspaceRequest request, @RequestParam String newName) {
-        fileSystemService.renameFile(request, newName);
+    public ResponseEntity<String> renameFile(@RequestBody FileRequest request) {
+        fileSystemService.renameFile(request);
         return ResponseEntity.ok("변경됨");
     }
 
-    // 10. [신규] 프로젝트 빌드 및 다운로드
+    // 9. 빌드
     @PostMapping("/build")
-    public ResponseEntity<Resource> buildProject(@RequestBody WorkspaceRequest request) {
+    public ResponseEntity<Resource> buildProject(@RequestBody BuildRequest request) {
         try {
-            // 1. 빌드 실행 후 생성된 파일 경로 받기
             String builtFilePath = fileSystemService.buildProject(request);
-
-            // 2. 파일 리소스 로드
             Path path = Paths.get(builtFilePath);
             Resource resource = new UrlResource(path.toUri());
 
-            if (!resource.exists()) {
-                throw new RuntimeException("빌드 결과물을 찾을 수 없습니다.");
-            }
-
-            String downloadName = resource.getFilename(); // 예: my-java-app.jar
+            if (!resource.exists()) throw new RuntimeException("빌드 파일 없음");
 
             return ResponseEntity.ok()
                     .contentType(MediaType.APPLICATION_OCTET_STREAM)
-                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + downloadName + "\"")
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + resource.getFilename() + "\"")
                     .body(resource);
-
-        } catch (MalformedURLException e) {
-            throw new RuntimeException("파일 경로 오류: " + e.getMessage());
-        }
+        } catch (MalformedURLException e) { throw new RuntimeException("경로 오류"); }
     }
 }
