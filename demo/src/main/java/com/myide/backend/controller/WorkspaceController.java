@@ -1,7 +1,7 @@
 package com.myide.backend.controller;
 
 import com.myide.backend.domain.Workspace;
-import com.myide.backend.service.FileSystemService;
+import com.myide.backend.service.WorkspaceService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -15,12 +15,13 @@ import java.util.Map;
 @CrossOrigin(origins = "*")
 public class WorkspaceController {
 
-    private final FileSystemService fileSystemService;
+    // 💡 [수정] 서비스 주입 변경
+    private final WorkspaceService workspaceService;
 
     // 내 워크스페이스 목록 조회
     @GetMapping
     public ResponseEntity<List<Workspace>> getMyWorkspaces(@RequestParam String userId) {
-        return ResponseEntity.ok(fileSystemService.getMyWorkspaces(userId));
+        return ResponseEntity.ok(workspaceService.getMyWorkspaces(userId));
     }
 
     // 워크스페이스 생성 (path 파라미터 수신)
@@ -28,8 +29,9 @@ public class WorkspaceController {
     public ResponseEntity<Workspace> createWorkspace(@RequestBody Map<String, String> body) {
         String userId = body.get("userId");
         String name = body.get("name");
-        String path = body.get("path"); // [New] 경로 정보 (없으면 null)
+        String path = body.get("path"); // 경로 정보 (없으면 null)
 
-        return ResponseEntity.ok(fileSystemService.createWorkspace(userId, name, path));
+        // 💡 [수정] workspaceService 호출
+        return ResponseEntity.ok(workspaceService.createWorkspace(userId, name, path));
     }
 }

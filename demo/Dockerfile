@@ -11,12 +11,12 @@ ENV LANG=en_US.UTF-8
 ENV LANGUAGE=en_US:en
 ENV LC_ALL=en_US.UTF-8
 
-# [핵심 수정] .NET 초기 환영 메시지 및 텔레메트리 제거
+# .NET 초기 환영 메시지 및 텔레메트리 제거
 ENV DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
 ENV DOTNET_NOLOGO=1
 
-# 4. 기본 유틸리티 및 필수 패키지 설치
+# 4. 기본 유틸리티, 필수 패키지 및 gdb 설치
 RUN apt-get update && apt-get install -y \
     locales \
     curl \
@@ -26,6 +26,7 @@ RUN apt-get update && apt-get install -y \
     unzip \
     software-properties-common \
     build-essential \
+    gdb \
     && locale-gen en_US.UTF-8 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -33,9 +34,10 @@ RUN apt-get update && apt-get install -y \
 RUN apt-get update && apt-get install -y openjdk-17-jdk \
     && rm -rf /var/lib/apt/lists/*
 
-# 6. Python 3 및 PIP 설치
+# 6. Python 3 및 PIP, debugpy 설치
 RUN apt-get update && apt-get install -y python3 python3-pip \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && pip3 install debugpy
 
 # 7. Node.js 18 (LTS) 설치
 RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \

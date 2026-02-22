@@ -52,7 +52,7 @@ dependencies {
     // [New] Git 기능 제어 (JGit)
     implementation 'org.eclipse.jgit:org.eclipse.jgit:6.5.0.202303070854-r'
 
-
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.3.0'
 
 
 }
