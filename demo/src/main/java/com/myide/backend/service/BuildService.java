@@ -39,7 +39,9 @@ public class BuildService {
 
         String outputFileName = lang.getOutputFileName().replace("{project}", projectName);
         String rawBuildCmd = lang.getBuildCommand().replace("{output}", outputFileName);
-        String cmd = String.format("cd %s/%s && %s", projectName, branchFolder, rawBuildCmd);
+
+        // 💡 [핵심 수정] cd 이동 경로에 쌍따옴표(\" \")를 씌워서 띄어쓰기 폴더명 완벽 방어!
+        String cmd = String.format("cd \"%s/%s\" && %s", projectName, branchFolder, rawBuildCmd);
         String containerFilePath = "/app/" + projectName + "/" + branchFolder + "/" + outputFileName;
 
         Path tempDir = Paths.get(workspace.getPath(), ".temp");

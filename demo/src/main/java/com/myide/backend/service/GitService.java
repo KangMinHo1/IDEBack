@@ -179,4 +179,65 @@ public class GitService {
             throw new RuntimeException("푸시 실패: 확인 후 다시 시도해주세요. (토큰 만료 또는 권한 부족일 수 있습니다.)");
         }
     }
+
+    // 💡 1. Pull (원격 저장소에서 당겨오기 - Push처럼 토큰 주입 필요)
+    public void pull(Path targetPath, String token) {
+        try {
+            String remoteUrl = executeGitCommand(targetPath, "git", "config", "--get", "remote.origin.url").trim();
+            if (remoteUrl.isEmpty()) throw new RuntimeException("원격 저장소가 연동되어 있지 않습니다.");
+
+            String pullUrl = remoteUrl;
+            if (remoteUrl.startsWith("https://")) {
+                pullUrl = remoteUrl.replace("https://", "https://" + token + "@");
+            }
+
+            String currentBranch = executeGitCommand(targetPath, "git", "rev-parse", "--abbrev-ref", "HEAD").trim();
+            log.info("📥 Pulling branch '{}' from remote...", currentBranch);
+            executeGitCommand(targetPath, "git", "pull", pullUrl, currentBranch);
+            log.info("✅ Pull Completed Successfully!");
+        } catch (Exception e) {
+            log.error("Git Pull Failed", e);
+            throw new RuntimeException("Pull 실패 (충돌 발생 또는 토큰 권한 문제): " + e.getMessage());
+        }
+    }
+
+    // 💡 2. Merge (다른 브랜치를 현재 브랜치로 병합)
+    public void merge(Path repoPath, String targetBranch) {
+        try {
+            executeGitCommand(repoPath, "git", "merge", targetBranch);
+            log.info("🔀 Merged branch '{}' into current branch.", targetBranch);
+        } catch (Exception e) {
+            throw new RuntimeException("Merge 실패 (충돌 Conflict 발생): " + e.getMessage());
+        }
+    }
+
+    // 💡 3. History (소스트리처럼 로그 가져오기)
+    public List<Map<String, String>> getHistory(Path repoPath) {
+        try {
+            // 구분자를 |*| 로 설정해서 파싱 오류를 최소화합니다.
+            // 출력 포맷: 해시 |*| 작성자 |*| 날짜 |*| 커밋메시지 |*| 브랜치(태그) 정보
+            String output = executeGitCommand(repoPath, "git", "log", "--all", "--pretty=format:%h|*|%an|*|%ad|*|%s|*|%d", "--date=short");
+            List<Map<String, String>> history = new ArrayList<>();
+
+            if (output.trim().isEmpty()) return history;
+
+            for (String line : output.split("\n")) {
+                String[] parts = line.split("\\|\\*\\|");
+                if (parts.length >= 4) {
+                    Map<String, String> commit = new HashMap<>();
+                    commit.put("hash", parts[0].trim());
+                    commit.put("author", parts[1].trim());
+                    commit.put("date", parts[2].trim());
+                    commit.put("message", parts[3].trim());
+                    // 괄호 (HEAD -> main, origin/main) 등을 제거하고 깔끔하게 전달
+                    String refs = parts.length == 5 ? parts[4].trim().replaceAll("[\\(\\)]", "") : "";
+                    commit.put("refs", refs);
+                    history.add(commit);
+                }
+            }
+            return history;
+        } catch (Exception e) {
+            throw new RuntimeException("히스토리 조회 실패: " + e.getMessage());
+        }
+    }
 }

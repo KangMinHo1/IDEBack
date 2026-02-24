@@ -19,7 +19,7 @@ public class Workspace {
     private String ownerId;   // 생성자 ID
     private String description;
 
-    // [New] 워크스페이스가 저장된 실제 서버 경로 (예: D:\MyWork\JavaStudy)
+    // [New] 워크스페이스장된 실제 서버 경로 (예: D:\MyWork\JavaStudy)
     @Column(nullable = false)
     private String path;
 

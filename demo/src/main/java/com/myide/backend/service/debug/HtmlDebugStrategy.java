@@ -1,4 +1,4 @@
-package com.myide.backend.service;
+package com.myide.backend.service.debug;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.myide.backend.domain.LanguageType;

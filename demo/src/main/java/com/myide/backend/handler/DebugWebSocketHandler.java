@@ -6,7 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.myide.backend.domain.LanguageType;
 import com.myide.backend.domain.Project;
 import com.myide.backend.repository.ProjectRepository;
-import com.myide.backend.service.DebugStrategy;
+import com.myide.backend.service.debug.DebugStrategy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;

@@ -1,6 +1,7 @@
-package com.myide.backend.service;
+package com.myide.backend.service.debug;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.myide.backend.service.DockerService;
 import com.sun.jdi.*;
 import com.sun.jdi.connect.AttachingConnector;
 import com.sun.jdi.connect.Connector;
@@ -25,7 +26,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @Slf4j
 @Service // 이 클래스는 서비스 로직을 담당하는 스프링 빈입니다.
 @RequiredArgsConstructor
-public class JavaDebugStrategy implements DebugStrategy{
+public class JavaDebugStrategy implements DebugStrategy {
 
     private final ObjectMapper objectMapper;
     private final DockerService dockerService;
@@ -67,11 +68,18 @@ public class JavaDebugStrategy implements DebugStrategy{
                 log.info("🚀 [JDI] Attached to JVM: {}", sessionId);
                 sendOutput(session, createMessage("OUTPUT", "[System] Debugger Attached."));
 
-                // 3. 자바 프로그램이 시작될 때 Main 이라는 이름의 클래스가 로딩되면 알려달라고 요청(이벤트)을 만듭니다.
+                // 💡 프론트에서 받은 filePath에서 클래스 이름 추출
+                String fileName = filePath;
+                if (filePath != null && filePath.contains("/")) {
+                    fileName = filePath.substring(filePath.lastIndexOf("/") + 1);
+                }
+                String className = fileName.replace(".java", "");
+
+                // 3. 동적으로 넘어온 클래스가 로딩될 때 감시 시작!
                 EventRequestManager erm = vm.eventRequestManager();
                 ClassPrepareRequest cpr = erm.createClassPrepareRequest();
-                cpr.addClassFilter("Main"); // Main 클래스를 감시합니다.
-                cpr.enable(); // 감시 켜기!
+                cpr.addClassFilter(className); // 💡 Main 대신 className을 넣습니다!
+                cpr.enable();
 
                 // 4. 자바 프로그램 실행을 재개(resume)하고, 발생하는 이벤트(줄 멈춤 등)를 계속 지켜보는 무한 루프를 돕니다.
                 vm.resume();

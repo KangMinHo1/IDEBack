@@ -84,4 +84,27 @@ public class GitController {
         gitService.push(repoPath, token);
         return ResponseEntity.ok("Push successfully");
     }
+
+    // 9. Pull
+    @PostMapping("/pull")
+    public ResponseEntity<String> pullFromRemote(@RequestBody Map<String, String> body) {
+        Path repoPath = workspaceService.getProjectPath(body.get("workspaceId"), body.get("projectName"), body.get("branchName"));
+        gitService.pull(repoPath, body.get("token"));
+        return ResponseEntity.ok("Pull successfully");
+    }
+
+    // 10. Merge
+    @PostMapping("/merge")
+    public ResponseEntity<String> mergeBranch(@RequestBody Map<String, String> body) {
+        Path repoPath = workspaceService.getProjectPath(body.get("workspaceId"), body.get("projectName"), body.get("branchName"));
+        gitService.merge(repoPath, body.get("targetBranch"));
+        return ResponseEntity.ok("Merge successfully");
+    }
+
+    // 11. History (로그 목록)
+    @GetMapping("/{workspaceId}/{projectName}/history")
+    public ResponseEntity<List<Map<String, String>>> getHistory(@PathVariable String workspaceId, @PathVariable String projectName, @RequestParam(defaultValue = "main-repo") String branchName) {
+        Path repoPath = workspaceService.getProjectPath(workspaceId, projectName, branchName);
+        return ResponseEntity.ok(gitService.getHistory(repoPath));
+    }
 }
