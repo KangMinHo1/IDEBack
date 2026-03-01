@@ -34,6 +34,8 @@ dependencies {
     // 4. 데이터베이스 & JPA
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     runtimeOnly 'com.h2database:h2'
+    // MySQL 연결용 드라이버
+    implementation 'com.mysql:mysql-connector-j'
 
     // 5. 롬복
     compileOnly 'org.projectlombok:lombok'

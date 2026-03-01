@@ -5,24 +5,30 @@ spring:
   application:
     name: my-web-ide
 
-  # ?????? ?? (?? ??? DB? H2 ??)
+  # 💡 [수정됨] H2 메모리 DB 대신 MySQL 영구 DB로 연결!
   datasource:
-    url: jdbc:h2:mem:testdb
-    driverClassName: org.h2.Driver
-    username: sa
-    password:
-  h2:
-    console:
-      enabled: true  # http://localhost:8080/h2-console ? DB ?? ??
+    url: jdbc:mysql://localhost:3306/myide?useSSL=false&characterEncoding=UTF-8&serverTimezone=Asia/Seoul
+    driverClassName: com.mysql.cj.jdbc.Driver
+    username: root    # 🚨 본인의 MySQL 아이디를 적어주세요 (보통 root)
+    password: mysql    # 🚨 본인의 MySQL 비밀번호를 적어주세요
 
-  # ?? ??? ?? (??? ???? ??? ???? ? ??)
+  # 💡 [추가됨] JPA(Hibernate)가 자바 코드를 보고 MySQL에 테이블을 자동으로 만들어주게 하는 마법의 설정!
+  jpa:
+    hibernate:
+      ddl-auto: update  # update: 테이블이 없으면 만들고, 있으면 변경사항만 업데이트 (기존 데이터 보존)
+    show-sql: true      # 실행되는 SQL 쿼리를 콘솔 창에 보여줌 (디버깅용)
+    properties:
+      hibernate:
+        format_sql: true # SQL 쿼리를 보기 좋게 예쁘게 정렬해서 보여줌
+
+  # 대용량 파일 업로드 설정
   servlet:
     multipart:
       max-file-size: 100MB
       max-request-size: 100MB
 
-# ??? ?? (??? ?? ???? ???? ? ??)
+# 커스텀 설정
 ide:
   docker:
-    host: tcp://localhost:2375  # ???/? ?? ?? ??
-    workspace-path: ./temp-workspace # ??? ??? ??? ?? ??
+    host: tcp://localhost:2375
+    workspace-path: ./temp-workspace
