@@ -40,7 +40,7 @@ public class GitController {
     }
 
     @GetMapping("/{workspaceId}/{projectName}/status")
-    public ResponseEntity<Map<String, Object>> getStatus(@PathVariable String workspaceId, @PathVariable String projectName, @RequestParam(defaultValue = "main-repo") String branchName) {
+    public ResponseEntity<Map<String, Object>> getStatus(@PathVariable String workspaceId, @PathVariable String projectName, @RequestParam(defaultValue = "master") String branchName) {
         Path repoPath = workspaceService.getProjectPath(workspaceId, projectName, branchName);
         return ResponseEntity.ok(gitService.getStatus(repoPath));
     }
@@ -59,33 +59,23 @@ public class GitController {
         return ResponseEntity.ok("Unstaged successfully");
     }
 
-    // 7. Commit (커밋하기)
     @PostMapping("/commit")
     public ResponseEntity<String> commitChanges(@RequestBody Map<String, String> body) {
         Path repoPath = workspaceService.getProjectPath(body.get("workspaceId"), body.get("projectName"), body.get("branchName"));
-
-        // 프론트에서 넘어온 작성자 정보 추출
         String authorName = body.get("authorName");
         String authorEmail = body.get("authorEmail");
-
-        // GitService로 전달
         gitService.commit(repoPath, body.get("commitMessage"), authorName, authorEmail);
         return ResponseEntity.ok("Commit successfully");
     }
 
-    // 8. Push (원격 저장소로 밀어올리기)
     @PostMapping("/push")
     public ResponseEntity<String> pushToRemote(@RequestBody Map<String, String> body) {
         Path repoPath = workspaceService.getProjectPath(body.get("workspaceId"), body.get("projectName"), body.get("branchName"));
-
-        // 프론트에서 넘어온 깃허브 토큰
         String token = body.get("token");
-
         gitService.push(repoPath, token);
         return ResponseEntity.ok("Push successfully");
     }
 
-    // 9. Pull
     @PostMapping("/pull")
     public ResponseEntity<String> pullFromRemote(@RequestBody Map<String, String> body) {
         Path repoPath = workspaceService.getProjectPath(body.get("workspaceId"), body.get("projectName"), body.get("branchName"));
@@ -93,7 +83,6 @@ public class GitController {
         return ResponseEntity.ok("Pull successfully");
     }
 
-    // 10. Merge
     @PostMapping("/merge")
     public ResponseEntity<String> mergeBranch(@RequestBody Map<String, String> body) {
         Path repoPath = workspaceService.getProjectPath(body.get("workspaceId"), body.get("projectName"), body.get("branchName"));
@@ -101,10 +90,31 @@ public class GitController {
         return ResponseEntity.ok("Merge successfully");
     }
 
-    // 11. History (로그 목록)
+    // 💡 [New] 병합 취소 (Abort) API 추가!
+    @PostMapping("/merge/abort")
+    public ResponseEntity<String> abortMerge(@RequestBody Map<String, String> body) {
+        Path repoPath = workspaceService.getProjectPath(body.get("workspaceId"), body.get("projectName"), body.get("branchName"));
+        gitService.abortMerge(repoPath);
+        return ResponseEntity.ok("Merge aborted successfully");
+    }
+
     @GetMapping("/{workspaceId}/{projectName}/history")
-    public ResponseEntity<List<Map<String, String>>> getHistory(@PathVariable String workspaceId, @PathVariable String projectName, @RequestParam(defaultValue = "main-repo") String branchName) {
+    public ResponseEntity<List<Map<String, String>>> getHistory(@PathVariable String workspaceId, @PathVariable String projectName, @RequestParam(defaultValue = "master") String branchName) {
         Path repoPath = workspaceService.getProjectPath(workspaceId, projectName, branchName);
         return ResponseEntity.ok(gitService.getHistory(repoPath));
+    }
+
+    @PostMapping("/reset")
+    public ResponseEntity<String> resetCommit(@RequestBody Map<String, String> body) {
+        Path repoPath = workspaceService.getProjectPath(body.get("workspaceId"), body.get("projectName"), body.get("branchName"));
+        gitService.reset(repoPath, body.get("targetHash"));
+        return ResponseEntity.ok("Reset successfully");
+    }
+
+    @PostMapping("/checkout-commit")
+    public ResponseEntity<String> checkoutCommit(@RequestBody Map<String, String> body) {
+        Path repoPath = workspaceService.getProjectPath(body.get("workspaceId"), body.get("projectName"), body.get("branchName"));
+        gitService.checkoutCommit(repoPath, body.get("targetHash"));
+        return ResponseEntity.ok("Checkout successfully");
     }
 }

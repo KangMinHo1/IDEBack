@@ -55,16 +55,18 @@ public class ProjectService {
     public void createNewProject(CreateProjectRequest request) {
         Workspace workspace = workspaceRepository.findById(request.getWorkspaceId()).orElseThrow();
         Path projectRoot = Paths.get(workspace.getPath(), request.getProjectName());
-        Path mainRepoPath = projectRoot.resolve("main-repo");
+
+        // 💡 [수정됨] 프로젝트의 메인 폴더 이름을 'master'로 생성합니다!
+        Path masterRepoPath = projectRoot.resolve("master");
 
         try {
             if (Files.exists(projectRoot)) throw new RuntimeException("이미 존재하는 프로젝트입니다.");
-            Files.createDirectories(mainRepoPath);
-            createTemplateFiles(mainRepoPath, request.getLanguage());
-            gitService.createRepository(mainRepoPath);
+            Files.createDirectories(masterRepoPath);
+            createTemplateFiles(masterRepoPath, request.getLanguage());
+            gitService.createRepository(masterRepoPath);
 
             if (request.getGitUrl() != null && !request.getGitUrl().isBlank()) {
-                gitService.addRemote(mainRepoPath, request.getGitUrl());
+                gitService.addRemote(masterRepoPath, request.getGitUrl());
             }
 
             projectRepository.save(Project.builder()
@@ -81,20 +83,23 @@ public class ProjectService {
                 .findFirst().orElseThrow();
 
         projectRepository.save(new Project(project.getId(), project.getName(), project.getDescription(), project.getLanguage(), gitUrl, project.getWorkspace()));
-        Path mainRepoPath = Paths.get(workspace.getPath(), projectName).resolve("main-repo");
-        gitService.addRemote(mainRepoPath, gitUrl);
+        // 💡 [수정됨] master 폴더 경로로 잡기
+        Path masterRepoPath = Paths.get(workspace.getPath(), projectName).resolve("master");
+        gitService.addRemote(masterRepoPath, gitUrl);
     }
 
     public void createBranch(FileRequest request) {
         Workspace workspace = workspaceRepository.findById(request.getWorkspaceId()).orElseThrow();
         Path projectRoot = Paths.get(workspace.getPath(), request.getProjectName());
-        Path mainRepoPath = projectRoot.resolve("main-repo");
+
+        // 💡 [수정됨] 기준 폴더를 master로 설정
+        Path masterRepoPath = projectRoot.resolve("master");
         Path worktreePath = projectRoot.resolve(request.getBranchName());
 
-        if (!Files.exists(mainRepoPath)) throw new RuntimeException("메인 저장소를 찾을 수 없습니다.");
+        if (!Files.exists(masterRepoPath)) throw new RuntimeException("메인 저장소를 찾을 수 없습니다.");
         if (Files.exists(worktreePath)) throw new RuntimeException("이미 존재하는 브랜치입니다.");
 
-        gitService.createWorktree(mainRepoPath, worktreePath, request.getBranchName());
+        gitService.createWorktree(masterRepoPath, worktreePath, request.getBranchName());
     }
 
     public List<String> getBranchList(String workspaceId, String projectName) {

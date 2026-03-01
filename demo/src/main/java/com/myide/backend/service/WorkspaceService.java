@@ -20,14 +20,14 @@ public class WorkspaceService {
     private static final String DEFAULT_ROOT = "C:\\WebIDE\\workspaces";
     private final WorkspaceRepository workspaceRepository;
 
-    // [핵심 공통 로직] DB를 뒤져서 특정 프로젝트/브랜치의 실제 디스크 경로를 알아냅니다.
     public Path getProjectPath(String workspaceId, String projectName, String branchName) {
         Workspace workspace = workspaceRepository.findById(workspaceId)
                 .orElseThrow(() -> new RuntimeException("워크스페이스를 찾을 수 없습니다: " + workspaceId));
 
+        // 💡 [수정됨] 기본 브랜치 및 폴더명을 'master'로 완벽 통일! (기존 main-repo 호환성 유지)
         String realBranchFolder = (branchName == null || branchName.isBlank() ||
-                "main-repo".equals(branchName) || "main".equals(branchName))
-                ? "main-repo" : branchName;
+                "main-repo".equals(branchName) || "main".equals(branchName) || "master".equals(branchName))
+                ? "master" : branchName;
 
         return Paths.get(workspace.getPath(), projectName, realBranchFolder);
     }
