@@ -5,7 +5,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.myide.backend.domain.LanguageType;
 import com.myide.backend.domain.Project;
-import com.myide.backend.repository.ProjectRepository;
+import com.myide.backend.domain.Workspace;
+import com.myide.backend.repository.WorkspaceRepository; // 💡 추가됨
+import com.myide.backend.service.WorkspaceService; // 💡 추가됨
 import com.myide.backend.service.debug.DebugStrategy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -15,6 +17,7 @@ import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -26,11 +29,11 @@ public class DebugWebSocketHandler extends TextWebSocketHandler {
 
     private final List<DebugStrategy> debugStrategies;
     private final ObjectMapper objectMapper;
-    private final ProjectRepository projectRepository;
+    private final WorkspaceService workspaceService; // 💡 공통 서비스 주입
+    private final WorkspaceRepository workspaceRepository; // 프로젝트를 효율적으로 찾기 위함
 
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
-        // 💡 [핵심 해결] 전체 로직을 try-catch로 감싸서 에러가 나도 웹소켓이 끊기지 않게 방어합니다.
         try {
             JsonNode json = objectMapper.readTree(message.getPayload());
             if (!json.has("type")) return;
@@ -39,21 +42,31 @@ public class DebugWebSocketHandler extends TextWebSocketHandler {
             if ("START".equals(type)) {
                 String workspaceId = json.get("workspaceId").asText();
                 String projectName = json.get("projectName").asText();
-                String branchName = json.has("branchName") ? json.get("branchName").asText() : "main-repo";
+                String branchName = json.has("branchName") ? json.get("branchName").asText() : "master";
                 String filePath = json.has("filePath") ? json.get("filePath").asText() : "";
+
+                // 💡 1. 실행 전 폴더 검증!
+                Path checkPath = workspaceService.getProjectPath(workspaceId, projectName, branchName);
+                if (!checkPath.toFile().exists()) {
+                    throw new RuntimeException("디버깅할 프로젝트 경로를 찾을 수 없습니다: " + checkPath.toString());
+                }
+
+                // 💡 2. 성능 최적화: findAll() 대신 Workspace를 통해 해당 프로젝트 탐색
+                Workspace workspace = workspaceRepository.findById(workspaceId)
+                        .orElseThrow(() -> new RuntimeException("워크스페이스를 찾을 수 없습니다."));
+
+                Project project = workspace.getProjects().stream()
+                        .filter(p -> p.getName().equals(projectName))
+                        .findFirst()
+                        .orElseThrow(() -> new RuntimeException("해당 프로젝트를 찾을 수 없습니다."));
+
+                LanguageType language = project.getLanguage();
 
                 JsonNode breakpointsNode = json.get("breakpoints");
                 List<Map<String, Object>> breakpoints = objectMapper.convertValue(
                         breakpointsNode,
                         new TypeReference<List<Map<String, Object>>>() {}
                 );
-
-                Project project = projectRepository.findAll().stream()
-                        .filter(p -> p.getWorkspace().getUuid().equals(workspaceId) && p.getName().equals(projectName))
-                        .findFirst()
-                        .orElseThrow(() -> new RuntimeException("프로젝트를 찾을 수 없습니다."));
-
-                LanguageType language = project.getLanguage();
 
                 DebugStrategy strategy = debugStrategies.stream()
                         .filter(s -> s.supports(language))
@@ -75,7 +88,6 @@ public class DebugWebSocketHandler extends TextWebSocketHandler {
                 }
             }
         } catch (Exception e) {
-            // 💡 [핵심 해결] 백엔드에서 에러가 터지면, 연결을 끊는 대신 프론트엔드로 에러 메시지를 발송합니다!
             log.error("❌ 디버깅 소켓 처리 중 에러 발생: ", e);
             Map<String, String> errorMsg = new HashMap<>();
             errorMsg.put("type", "ERROR");

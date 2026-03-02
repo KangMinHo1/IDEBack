@@ -10,8 +10,6 @@ import com.github.dockerjava.api.model.Ports;
 import com.github.dockerjava.core.command.AttachContainerResultCallback;
 import com.github.dockerjava.core.command.WaitContainerResultCallback;
 import com.myide.backend.domain.LanguageType;
-import com.myide.backend.domain.Workspace;
-import com.myide.backend.repository.WorkspaceRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
@@ -33,20 +31,17 @@ import java.util.function.Consumer;
 public class DockerService {
 
     private final DockerClient dockerClient;
-    private final WorkspaceRepository workspaceRepository;
+    // 💡 Repository를 빼고 WorkspaceService를 넣습니다!
+    private final WorkspaceService workspaceService;
 
-    // 💡 [원상 복구] 일반 실행(Run) 시 스캐너 입력을 받기 위한 파이프라인 맵 (복구완료!)
     private final Map<String, PipedOutputStream> runInputMap = new ConcurrentHashMap<>();
     private final Map<String, String> runningContainerMap = new ConcurrentHashMap<>();
     private final Map<String, String> terminalContainerMap = new ConcurrentHashMap<>();
     private final Map<String, PipedOutputStream> terminalInputMap = new ConcurrentHashMap<>();
 
+    // 💡 [핵심 수정] 이제 복잡한 계산 없이 공통 서비스의 경로를 그대로 가져와서 문자열로 바꿔주기만 합니다!
     private String calculateHostPath(String workspaceId, String projectName, String branchName) {
-        Workspace workspace = workspaceRepository.findById(workspaceId)
-                .orElseThrow(() -> new RuntimeException("Workspace not found for execution"));
-        String realBranchFolder = (branchName == null || branchName.isBlank() || "main-repo".equals(branchName) || "main".equals(branchName))
-                ? "main-repo" : branchName;
-        return Paths.get(workspace.getPath(), projectName, realBranchFolder).toAbsolutePath().toString();
+        return workspaceService.getProjectPath(workspaceId, projectName, branchName).toString();
     }
 
     // --- [Track 1] Run Project (일반 실행) ---
@@ -83,7 +78,6 @@ public class DockerService {
 
                 dockerClient.copyArchiveToContainerCmd(containerId).withHostResource(hostPath + "/.").withRemotePath("/app").exec();
 
-                // 💡 [원상 복구] 일반 실행용 스캐너 입력 파이프라인
                 PipedOutputStream outToDocker = new PipedOutputStream();
                 runInputMap.put(sessionId, outToDocker);
 
@@ -108,7 +102,6 @@ public class DockerService {
                     }
                 };
 
-                // 스캐너 입력을 위해 PipedInputStream 연결
                 dockerClient.attachContainerCmd(containerId)
                         .withStdOut(true).withStdErr(true).withStdIn(new PipedInputStream(outToDocker))
                         .withFollowStream(true).exec(callback);
@@ -165,7 +158,6 @@ public class DockerService {
 
             dockerClient.copyArchiveToContainerCmd(containerId).withHostResource(hostPath + "/.").withRemotePath("/app").exec();
 
-            // 자바 디버깅은 Scanner 입력을 받을 수 있으므로 파이프라인 유지
             PipedOutputStream outToDocker = new PipedOutputStream();
             runInputMap.put(sessionId, outToDocker);
 
@@ -235,58 +227,44 @@ public class DockerService {
                 });
     }
 
-    // --- DockerService.java 내부 ---
-
-    // 💡 [최종 수정] 컨테이너 종료 시, 파이프라인까지 완벽하게 분쇄하여 다음 디버깅에 영향을 주지 않도록 청소합니다!
     public void stopContainer(String sessionId) {
-        // 1. 실행 중인 컨테이너 맵에서 제거
         String containerId = runningContainerMap.remove(sessionId);
 
         if (containerId != null) {
             try {
-                // 도커 컨테이너 강제 파괴
                 dockerClient.removeContainerCmd(containerId).withForce(true).exec();
             } catch (Exception e) {
                 log.warn("컨테이너 강제 종료 중 오류 (이미 종료되었을 수 있음): {}", e.getMessage());
             }
         }
 
-        // 2. 🚨 [핵심] 파이프라인(PipedOutputStream) 완벽 청소!
-        // 이 파이프가 열려있으면 다음 파이썬 디버깅 때 Pipe Broken이 발생합니다.
         PipedOutputStream outputStream = runInputMap.remove(sessionId);
         if (outputStream != null) {
             try {
-                // 파이프에 남은 찌꺼기를 밀어내고 완전히 닫아버립니다.
                 outputStream.flush();
                 outputStream.close();
-            } catch (IOException e) {
-                // 이미 닫힌 파이프라면 무시
-            }
+            } catch (IOException e) {}
         }
     }
 
-    // 💡 [가장 핵심!!!] JS와 파이썬의 디버깅 명령어(step over 등)를 에러 없이 꽂아 넣는 마법의 메서드!
     public void writeToProcess(String sessionId, String input) {
         String containerId = runningContainerMap.get(sessionId);
 
         if (containerId != null) {
-            // 1. 일반 실행(스캐너 입력) 중일 경우: 기존의 파이프라인(PipedOutputStream)을 사용합니다.
             PipedOutputStream outputStream = runInputMap.get(sessionId);
             if (outputStream != null) {
                 try {
                     if (!input.endsWith("\n")) input += "\n";
                     outputStream.write(input.getBytes(StandardCharsets.UTF_8));
                     outputStream.flush();
-                    return; // 파이프로 잘 들어갔으면 여기서 종료!
+                    return;
                 } catch (IOException e) {
                     log.warn("파이프 입력 실패, docker exec로 대체합니다.");
                 }
             }
 
-            // 2. 파이프가 없거나 터진 경우 (주로 JS, Python 디버깅 시): docker exec로 우회해서 꽂아 넣습니다!
             try {
                 if (!input.endsWith("\n")) input += "\n";
-                // 컨테이너 메인 프로세스(PID 1)의 입력 포트(fd/0)에 강제 입력
                 String[] command = {"sh", "-c", "echo '" + input.replace("'", "'\\''") + "' > /proc/1/fd/0"};
 
                 String execId = dockerClient.execCreateCmd(containerId)
@@ -331,17 +309,15 @@ public class DockerService {
 
     // --- [Track 4] Build Support ---
     public void buildAndCopy(String workspaceId, String cmd, String containerFilePath, String hostFilePath) {
-        Workspace workspace = workspaceRepository.findById(workspaceId)
-                .orElseThrow(() -> new RuntimeException("Workspace not found for build"));
-
-        String hostWorkspacePath = workspace.getPath();
+        // 💡 [수정] 빌드 과정에서도 WorkspaceService를 통해 경로를 가져오도록 수정
+        Path hostWorkspacePath = workspaceService.getProjectPath(workspaceId, "", "master").getParent();
         String containerId = null;
         try {
             log.info("🔨 Building... Command: {}", cmd);
             CreateContainerResponse container = dockerClient.createContainerCmd("ide-execution-env").withWorkingDir("/app").withCmd("sh", "-c", cmd).exec();
             containerId = container.getId();
 
-            dockerClient.copyArchiveToContainerCmd(containerId).withHostResource(hostWorkspacePath + "/.").withRemotePath("/app").exec();
+            dockerClient.copyArchiveToContainerCmd(containerId).withHostResource(hostWorkspacePath.toString() + "/.").withRemotePath("/app").exec();
             dockerClient.startContainerCmd(containerId).exec();
             dockerClient.waitContainerCmd(containerId).exec(new WaitContainerResultCallback()).awaitCompletion();
 
@@ -393,9 +369,6 @@ public class DockerService {
 
                 dockerClient.copyArchiveToContainerCmd(containerId).withHostResource(hostPath + "/.").withRemotePath("/app").exec();
 
-                // 💡💡 [여기서부터 2줄 추가!!!] 💡💡
-                // 파이썬이 "인터폰이 없네?" 하고 퇴근하지 않도록,
-                // 허공에 연결된 빈 인터폰(PipedOutputStream)이라도 하나 만들어서 물려줍니다!
                 PipedOutputStream fakeIntercom = new PipedOutputStream();
                 PipedInputStream fakeReceiver = new PipedInputStream(fakeIntercom);
 
@@ -411,11 +384,9 @@ public class DockerService {
                     }
                 };
 
-                // 💡💡 [여기 1줄 수정!!!] 💡💡
-                // .withStdIn() 에 우리가 방금 만든 가짜 인터폰(fakeReceiver)을 달아줍니다!
                 dockerClient.attachContainerCmd(containerId)
                         .withStdOut(true).withStdErr(true)
-                        .withStdIn(fakeReceiver) // <--- 이것만 추가하시면 됩니다!
+                        .withStdIn(fakeReceiver)
                         .withFollowStream(true).exec(callback);
 
                 dockerClient.startContainerCmd(containerId).exec();
@@ -450,7 +421,6 @@ public class DockerService {
 
                 dockerClient.copyArchiveToContainerCmd(containerId).withHostResource(hostPath + "/.").withRemotePath("/app").exec();
 
-                // 💡 [수정] 입력 파이프라인 제거.
                 AttachContainerResultCallback callback = new AttachContainerResultCallback() {
                     @Override
                     public void onNext(Frame item) {

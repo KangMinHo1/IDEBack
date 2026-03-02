@@ -20,16 +20,17 @@ public class WorkspaceService {
     private static final String DEFAULT_ROOT = "C:\\WebIDE\\workspaces";
     private final WorkspaceRepository workspaceRepository;
 
+    // 💡 [핵심] 온 동네 서비스들이 경로를 물어보러 오는 마스터 메서드입니다!
     public Path getProjectPath(String workspaceId, String projectName, String branchName) {
         Workspace workspace = workspaceRepository.findById(workspaceId)
                 .orElseThrow(() -> new RuntimeException("워크스페이스를 찾을 수 없습니다: " + workspaceId));
 
-        // 💡 [수정됨] 기본 브랜치 및 폴더명을 'master'로 완벽 통일! (기존 main-repo 호환성 유지)
-        String realBranchFolder = (branchName == null || branchName.isBlank() ||
-                "main-repo".equals(branchName) || "main".equals(branchName) || "master".equals(branchName))
+        // 💡 브랜치명 통일 로직 (빈 값이거나 넘어오지 않으면 기본값 'master' 적용)
+        String realBranchFolder = (branchName == null || branchName.isBlank() || "master".equals(branchName) || "main-repo".equals(branchName))
                 ? "master" : branchName;
 
-        return Paths.get(workspace.getPath(), projectName, realBranchFolder);
+        // 완벽한 절대 경로 조립 후 반환
+        return Paths.get(workspace.getPath(), projectName, realBranchFolder).toAbsolutePath();
     }
 
     public Workspace createWorkspace(String userId, String name, String customPath) {
@@ -52,5 +53,12 @@ public class WorkspaceService {
         return workspaceRepository.findAll().stream()
                 .filter(w -> w.getOwnerId().equals(userId))
                 .collect(Collectors.toList());
+    }
+
+
+    public Path getWorkspaceRootPath(String workspaceId) {
+        Workspace workspace = workspaceRepository.findById(workspaceId)
+                .orElseThrow(() -> new RuntimeException("워크스페이스를 찾을 수 없습니다: " + workspaceId));
+        return Paths.get(workspace.getPath()).toAbsolutePath();
     }
 }

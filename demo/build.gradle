@@ -56,6 +56,9 @@ dependencies {
 
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.3.0'
 
+    // [추가] 자바 코드 AST 파싱을 위한 JavaParser
+    implementation 'com.github.javaparser:javaparser-core:3.25.8'
+
 
 }
 
