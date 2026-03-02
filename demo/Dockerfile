@@ -24,7 +24,8 @@ RUN apt-get update && apt-get install -y \
     git \
     zip \
     unzip \
-    software-properties-common \
+    software-properties \
+    -common \
     build-essential \
     gdb \
     && locale-gen en_US.UTF-8 \
