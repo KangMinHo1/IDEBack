@@ -1,8 +1,8 @@
-package com.myide.backend.service;
+package com.myide.backend.service.apitest;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.myide.backend.dto.ProxyRequest;
-import com.myide.backend.dto.ProxyResponse;
+import com.myide.backend.dto.apitest.ProxyRequest;
+import com.myide.backend.dto.apitest.ProxyResponse;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpStatusCodeException;

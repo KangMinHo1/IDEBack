@@ -1,8 +1,8 @@
-package com.myide.backend.service;
+package com.myide.backend.service.apitest;
 
 import com.myide.backend.domain.ApiTestHistory;
-import com.myide.backend.dto.HistoryRequest;
-import com.myide.backend.dto.HistoryResponse;
+import com.myide.backend.dto.apitest.HistoryRequest;
+import com.myide.backend.dto.apitest.HistoryResponse;
 import com.myide.backend.repository.ApiHistoryRepository;
 import org.springframework.stereotype.Service;
 

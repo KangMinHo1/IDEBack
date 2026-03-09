@@ -1,8 +1,8 @@
-package com.myide.backend.controller;
+package com.myide.backend.controller.apitest;
 
-import com.myide.backend.dto.HistoryRequest;
-import com.myide.backend.dto.HistoryResponse;
-import com.myide.backend.service.ApiHistoryService;
+import com.myide.backend.dto.apitest.HistoryRequest;
+import com.myide.backend.dto.apitest.HistoryResponse;
+import com.myide.backend.service.apitest.ApiHistoryService;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;

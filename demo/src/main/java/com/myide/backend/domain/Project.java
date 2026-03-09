@@ -3,9 +3,11 @@ package com.myide.backend.domain;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.*;
+import java.time.LocalDateTime;
 
 @Entity
 @Getter
+@Setter
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
@@ -33,6 +35,12 @@ public class Project {
     @JoinColumn(name = "workspace_id") // DB 컬럼명
     @JsonIgnore // 순환 참조 방지
     private Workspace workspace;
+
+
+    //  최근 수정일
+    @Column(nullable = false)
+    @Builder.Default
+    private LocalDateTime updatedAt = LocalDateTime.now();
 
     // 편의 메서드: 프로젝트 폴더명 생성 (ID 대신 이름 사용 시 중복 방지 로직 필요하지만 일단 심플하게)
     public String getFolderName() {

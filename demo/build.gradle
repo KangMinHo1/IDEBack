@@ -59,6 +59,10 @@ dependencies {
     // [추가] 자바 코드 AST 파싱을 위한 JavaParser
     implementation 'com.github.javaparser:javaparser-core:3.25.8'
 
+    //
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+
+    implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
 
 }
 

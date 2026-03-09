@@ -1,8 +1,8 @@
-package com.myide.backend.service;
+package com.myide.backend.service.apitest;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.myide.backend.dto.TestParamDto;
+import com.myide.backend.dto.apitest.TestParamDto;
 import org.springframework.stereotype.Component;
 
 import java.util.Collections;

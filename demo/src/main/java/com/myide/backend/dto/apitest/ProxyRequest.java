@@ -1,4 +1,4 @@
-package com.myide.backend.dto;
+package com.myide.backend.dto.apitest;
 
 import jakarta.validation.constraints.NotBlank;
 import lombok.*;

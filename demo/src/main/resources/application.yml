@@ -5,6 +5,7 @@ spring:
   application:
     name: my-web-ide
 
+
   # 💡 [수정됨] H2 메모리 DB 대신 MySQL 영구 DB로 연결!
   datasource:
     url: jdbc:mysql://localhost:3306/myide?useSSL=false&characterEncoding=UTF-8&serverTimezone=Asia/Seoul

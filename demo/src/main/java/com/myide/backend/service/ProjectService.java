@@ -18,6 +18,8 @@ import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import java.time.LocalDateTime;
+
 @Service
 @RequiredArgsConstructor
 public class ProjectService {
@@ -82,7 +84,10 @@ public class ProjectService {
                 .filter(p -> p.getWorkspace().getUuid().equals(workspaceId) && p.getName().equals(projectName))
                 .findFirst().orElseThrow();
 
-        projectRepository.save(new Project(project.getId(), project.getName(), project.getDescription(), project.getLanguage(), gitUrl, project.getWorkspace()));
+        project.setGitUrl(gitUrl);
+        project.setUpdatedAt(LocalDateTime.now());
+        projectRepository.save(project);
+
         // 💡 [수정됨] master 폴더 경로로 잡기
         Path masterRepoPath = Paths.get(workspace.getPath(), projectName).resolve("master");
         gitService.addRemote(masterRepoPath, gitUrl);
