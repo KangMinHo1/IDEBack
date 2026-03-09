@@ -15,7 +15,7 @@ import lombok.NoArgsConstructor;
         // 동일한 파일에 대한 중복 저장을 막기 위한 복합 유니크 제약 조건
         @UniqueConstraint(columnNames = {"workspaceId", "projectName", "branchName", "filePath"})
 })
-public class CodeSummary {
+public class CodeSummary { //코드맵 상세보기 AI 3줄요약
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

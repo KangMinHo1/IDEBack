@@ -4,7 +4,7 @@ import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.EnumDeclaration;
-import com.github.javaparser.ast.body.MethodDeclaration;
+import com.github.javaparser.ast.body.FieldDeclaration;
 import com.myide.backend.dto.codemap.CodeEdge;
 import com.myide.backend.dto.codemap.CodeMapResponse;
 import com.myide.backend.dto.codemap.CodeNode;
@@ -36,13 +36,14 @@ public class JavaAnalyzer implements CodeAnalyzer {
         Map<String, List<String>> fileImportsMap = new HashMap<>();
 
         try (Stream<Path> paths = Files.walk(Paths.get(projectRootPath))) {
-            List<File> javaFiles = paths.filter(Files::isRegularFile).filter(p -> p.toString().endsWith(".java")).map(Path::toFile).collect(Collectors.toList());
+            List<File> javaFiles = paths.filter(Files::isRegularFile)
+                    .filter(p -> p.toString().endsWith(".java"))
+                    .map(Path::toFile)
+                    .collect(Collectors.toList());
 
             String rootPathStr = new File(projectRootPath).getAbsolutePath().replace("\\", "/");
 
-            // ==========================================
-            // [1차 순회] 패키지 파악 및 노드 생성
-            // ==========================================
+            // [1차 순회] 노드 생성 및 맵 데이터 구축
             for (File file : javaFiles) {
                 String absolutePath = file.getAbsolutePath().replace("\\", "/");
                 String tempPath = absolutePath.replace(rootPathStr, "");
@@ -51,7 +52,6 @@ public class JavaAnalyzer implements CodeAnalyzer {
 
                 try {
                     CompilationUnit cu = StaticJavaParser.parse(file);
-
                     String packageName = cu.getPackageDeclaration().map(pd -> pd.getNameAsString()).orElse("default_package");
                     String fqcnPrefix = packageName.equals("default_package") ? "" : packageName + ".";
 
@@ -63,35 +63,26 @@ public class JavaAnalyzer implements CodeAnalyzer {
                     } else {
                         classes.forEach(cid -> {
                             String className = cid.getNameAsString();
-
                             fqcnToPathMap.put(fqcnPrefix + className, relativePath);
                             nameToPathMap.put(className, relativePath);
-
-                            // 💡 [수정] 객체지향 특성에 따른 역할 분류
-                            String role = determineOOPRole(cid);
-                            String nodeType = cid.isInterface() ? "INTERFACE" : (cid.isAbstract() ? "ABSTRACT" : "CLASS");
-
-                            nodes.add(new CodeNode(relativePath, className, nodeType, role, packageName));
+                            nodes.add(new CodeNode(relativePath, className,
+                                    cid.isInterface() ? "INTERFACE" : (cid.isAbstract() ? "ABSTRACT" : "CLASS"),
+                                    determineOOPRole(cid), packageName));
                         });
-
                         enums.forEach(ed -> {
                             String enumName = ed.getNameAsString();
                             fqcnToPathMap.put(fqcnPrefix + enumName, relativePath);
                             nameToPathMap.put(enumName, relativePath);
-                            // Enum은 열거형 역할 부여
                             nodes.add(new CodeNode(relativePath, enumName, "ENUM", "enum", packageName));
                         });
                     }
-
                     fileImportsMap.put(relativePath, cu.getImports().stream().map(id -> id.getNameAsString()).collect(Collectors.toList()));
                 } catch (Exception e) {
                     nodes.add(new CodeNode(relativePath, fileName + " (Syntax Error)", "CLASS", "file", "error_package"));
                 }
             }
 
-            // ==========================================
-            // [2차 순회] Import, Implements, Extends 화살표 긋기
-            // ==========================================
+            // [2차 순회] 관계(Edges) 분석 - relationType 필드명 사용
             for (File file : javaFiles) {
                 try {
                     CompilationUnit cu = StaticJavaParser.parse(file);
@@ -99,28 +90,51 @@ public class JavaAnalyzer implements CodeAnalyzer {
                     String tempSrc = absolutePath.replace(rootPathStr, "");
                     final String sourcePath = tempSrc.startsWith("/") ? tempSrc.substring(1) : tempSrc;
 
+                    // 1. Import 분석
                     List<String> imports = fileImportsMap.getOrDefault(sourcePath, new ArrayList<>());
                     for (String importedClass : imports) {
                         if (fqcnToPathMap.containsKey(importedClass)) {
                             String targetPath = fqcnToPathMap.get(importedClass);
-                            edges.add(new CodeEdge("e-imp-" + sourcePath.hashCode() + "-" + targetPath.hashCode(), sourcePath, targetPath, "smoothstep", "IMPORT"));
+                            if (!sourcePath.equals(targetPath)) {
+                                edges.add(new CodeEdge("e-imp-" + sourcePath.hashCode() + "-" + targetPath.hashCode(), sourcePath, targetPath, "smoothstep", "IMPORT"));
+                            }
                         }
                     }
 
                     cu.findAll(ClassOrInterfaceDeclaration.class).forEach(cid -> {
+                        // 2. Implements 분석
                         cid.getImplementedTypes().forEach(type -> {
                             String targetName = type.getNameAsString();
                             if (nameToPathMap.containsKey(targetName)) {
-                                String targetPath = nameToPathMap.get(targetName);
-                                edges.add(new CodeEdge("e-impl-" + sourcePath.hashCode() + "-" + targetPath.hashCode(), sourcePath, targetPath, "smoothstep", "IMPLEMENTS"));
+                                edges.add(new CodeEdge("e-impl-" + sourcePath.hashCode() + "-" + nameToPathMap.get(targetName).hashCode(), sourcePath, nameToPathMap.get(targetName), "smoothstep", "IMPLEMENTS"));
                             }
                         });
 
+                        // 3. Extends 분석
                         cid.getExtendedTypes().forEach(type -> {
                             String targetName = type.getNameAsString();
                             if (nameToPathMap.containsKey(targetName)) {
+                                edges.add(new CodeEdge("e-ext-" + sourcePath.hashCode() + "-" + nameToPathMap.get(targetName).hashCode(), sourcePath, nameToPathMap.get(targetName), "smoothstep", "EXTENDS"));
+                            }
+                        });
+
+                        // 4. Composition (참조) 분석 - 💡 필드 분석 추가
+                        cid.getFields().forEach(field -> {
+                            String targetName = field.getElementType().asString();
+                            // 제네릭 추출 (ex: List<User> -> User)
+                            if (targetName.contains("<") && targetName.contains(">")) {
+                                targetName = targetName.substring(targetName.indexOf("<") + 1, targetName.lastIndexOf(">"));
+                            }
+
+                            if (nameToPathMap.containsKey(targetName)) {
                                 String targetPath = nameToPathMap.get(targetName);
-                                edges.add(new CodeEdge("e-ext-" + sourcePath.hashCode() + "-" + targetPath.hashCode(), sourcePath, targetPath, "smoothstep", "EXTENDS"));
+                                if (!sourcePath.equals(targetPath)) {
+                                    // 중복 체크 (이미 동일한 COMPOSITION 관계가 있는지)
+                                    boolean exists = edges.stream().anyMatch(e -> e.getSource().equals(sourcePath) && e.getTarget().equals(targetPath) && "COMPOSITION".equals(e.getRelationType()));
+                                    if (!exists) {
+                                        edges.add(new CodeEdge("e-comp-" + sourcePath.hashCode() + "-" + targetPath.hashCode(), sourcePath, targetPath, "smoothstep", "COMPOSITION"));
+                                    }
+                                }
                             }
                         });
                     });
@@ -131,23 +145,12 @@ public class JavaAnalyzer implements CodeAnalyzer {
         return new CodeMapResponse(nodes, edges);
     }
 
-    // 💡 [핵심 수정] 스프링 키워드 제거, 순수 객체지향(OOP) 기준으로 역할 판별
     private String determineOOPRole(ClassOrInterfaceDeclaration cid) {
-        // 1. 메인 실행 클래스인지 판별 (public static void main 보유 여부)
-        boolean hasMain = cid.getMethodsByName("main").stream()
-                .anyMatch(m -> m.isPublic() && m.isStatic());
+        boolean hasMain = cid.getMethodsByName("main").stream().anyMatch(m -> m.isPublic() && m.isStatic());
         if (hasMain) return "main";
-
-        // 2. 인터페이스인지 판별
         if (cid.isInterface()) return "interface";
-
-        // 3. 추상 클래스인지 판별 (abstract 제어자 보유)
         if (cid.isAbstract()) return "abstract";
-
-        // 4. 예외(Exception) 클래스인지 판별 (이름이 Exception으로 끝나거나 상속받은 경우)
         if (cid.getNameAsString().endsWith("Exception")) return "exception";
-
-        // 5. 그 외엔 일반 구상(Concrete) 클래스
         return "class";
     }
 }

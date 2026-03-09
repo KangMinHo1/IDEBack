@@ -12,12 +12,15 @@ import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
 public class GitService {
 
-    // 💡 [핵심] Java JGit 대신, 진짜 터미널 Git 명령어를 쳐주는 헬퍼 함수!
+    // 💡 시스템 내부 관리 파일 키워드 (Git 작업에서 제외됨)
+    private static final String EXCLUDE_KEYWORD = "$$codemap$$";
+
     private String executeGitCommand(Path directory, String... commands) throws Exception {
         ProcessBuilder pb = new ProcessBuilder(commands);
         pb.directory(directory.toFile());
@@ -33,14 +36,12 @@ public class GitService {
         }
         int exitCode = process.waitFor();
         if (exitCode != 0 && !commands[1].equals("status")) {
-            // status는 변경사항이 있으면 0이 아닐 수도 있으므로 예외처리
             log.warn("Git 명령어 실패 [{}]: {}", Arrays.toString(commands), output.toString().trim());
             throw new RuntimeException(output.toString().trim());
         }
         return output.toString();
     }
 
-    // 💡 변수명을 masterRepoPath 로 통일했습니다.
     public void createRepository(Path masterRepoPath) {
         try {
             try (Git git = Git.init().setDirectory(masterRepoPath.toFile()).call()) {
@@ -49,6 +50,9 @@ public class GitService {
                 config.setString("user", null, "name", "WebIDE-Bot");
                 config.setString("user", null, "email", "bot@webide.com");
                 config.save();
+
+                // 초기 커밋 시에도 시스템 파일 제외를 위해 명시적 처리 가능하지만,
+                // 생성 직후에는 보통 소스코드만 있으므로 패턴 유지
                 git.add().addFilepattern(".").call();
                 git.commit().setMessage("Initial commit: Project Created").setSign(false).call();
                 log.info("✅ Initial Commit Completed.");
@@ -81,18 +85,15 @@ public class GitService {
         }
     }
 
-    // 💡 [핵심 수정] 병합 상태(isMerging)와 충돌 파일(conflicted)을 감지합니다!
+    // 💡 [수정] getStatus에서 $$codemap$$ 파일을 필터링합니다!
     public Map<String, Object> getStatus(Path repoPath) {
         try {
-            // 현재 병합 중인지 확인 (.git/MERGE_HEAD 파일이 존재하면 병합 중인 것임)
             boolean isMerging = Files.exists(repoPath.resolve(".git").resolve("MERGE_HEAD"));
-
-            // core.quotepath=false 옵션은 한글 파일명이 \355\225... 처럼 깨지는 것을 막아줍니다!
             String output = executeGitCommand(repoPath, "git", "-c", "core.quotepath=false", "status", "--porcelain");
 
             List<Map<String, String>> staged = new ArrayList<>();
             List<Map<String, String>> unstaged = new ArrayList<>();
-            List<Map<String, String>> conflicted = new ArrayList<>(); // 💡 충돌 파일 저장소
+            List<Map<String, String>> conflicted = new ArrayList<>();
 
             if (output.trim().isEmpty()) {
                 return Map.of("staged", staged, "unstaged", unstaged, "conflicted", conflicted, "isMerging", isMerging);
@@ -106,10 +107,14 @@ public class GitService {
 
                 if (path.startsWith("\"") && path.endsWith("\"")) path = path.substring(1, path.length() - 1);
 
-                // 💡 상태가 'U'가 포함되거나 'AA', 'DD'면 충돌(Conflict)이 발생한 파일입니다!
+                // ✨ [핵심 필터링] 경로에 $$codemap$$이 포함되어 있으면 프론트에 보내지 않습니다.
+                if (path.contains(EXCLUDE_KEYWORD)) {
+                    continue;
+                }
+
                 if (x.equals("U") || y.equals("U") || (x.equals("A") && y.equals("A")) || (x.equals("D") && y.equals("D"))) {
                     conflicted.add(Map.of("path", path, "status", "conflicted"));
-                    continue; // 충돌난 파일은 staged/unstaged에 넣지 않고 스킵합니다.
+                    continue;
                 }
 
                 if (x.equals("A") || x.equals("C") || x.equals("R")) staged.add(Map.of("path", path, "status", "added"));
@@ -121,7 +126,6 @@ public class GitService {
                 else if (x.equals("?") && y.equals("?")) unstaged.add(Map.of("path", path, "status", "added"));
             }
 
-            // 💡 프론트엔드로 전부 묶어서 던져줍니다.
             return Map.of("staged", staged, "unstaged", unstaged, "conflicted", conflicted, "isMerging", isMerging);
         } catch (Exception e) {
             log.error("Git Status Failed", e);
@@ -129,9 +133,32 @@ public class GitService {
         }
     }
 
+    // 💡 [수정] stage(add) 작업 시 $$codemap$$ 파일을 보호합니다!
     public void stage(Path repoPath, String filePattern) {
         try {
-            executeGitCommand(repoPath, "git", "add", filePattern);
+            // 만약 "Stage All" 버튼으로 "." 패턴이 들어온 경우
+            if (".".equals(filePattern)) {
+                log.info("🛡️ [Git] Stage All 요청 감지. 시스템 파일({}) 제외 처리를 시작합니다.", EXCLUDE_KEYWORD);
+                // 1. 전체를 add 하지 않고, status를 통해 파일 목록을 가져와서 필터링하여 개별 add 합니다.
+                String statusOutput = executeGitCommand(repoPath, "git", "status", "--porcelain");
+                for (String line : statusOutput.split("\n")) {
+                    if (line.length() < 3) continue;
+                    String path = line.substring(3).trim();
+                    if (path.startsWith("\"") && path.endsWith("\"")) path = path.substring(1, path.length() - 1);
+
+                    // 시스템 관리 파일이 아닐 때만 add 실행
+                    if (!path.contains(EXCLUDE_KEYWORD)) {
+                        executeGitCommand(repoPath, "git", "add", path);
+                    }
+                }
+            } else {
+                // 특정 파일 하나만 넘긴 경우 (이미 getStatus에서 필터링되었으므로 안전하지만 한 번 더 체크)
+                if (filePattern.contains(EXCLUDE_KEYWORD)) {
+                    log.warn("🛡️ [Git] 시스템 파일({})은 Stage 할 수 없습니다.", filePattern);
+                    return;
+                }
+                executeGitCommand(repoPath, "git", "add", filePattern);
+            }
         } catch (Exception e) {
             throw new RuntimeException("Stage 실패: " + e.getMessage());
         }
@@ -177,7 +204,7 @@ public class GitService {
 
         } catch (Exception e) {
             log.error("Git Push Failed", e);
-            throw new RuntimeException("푸시 실패: 확인 후 다시 시도해주세요. (토큰 만료 또는 권한 부족일 수 있습니다.)");
+            throw new RuntimeException("푸시 실패: 확인 후 다시 시도해주세요.");
         }
     }
 
@@ -210,7 +237,6 @@ public class GitService {
         }
     }
 
-    // 💡 [New] 병합 취소 (Abort) 메서드 추가!
     public void abortMerge(Path repoPath) {
         try {
             executeGitCommand(repoPath, "git", "merge", "--abort");
@@ -220,13 +246,8 @@ public class GitService {
         }
     }
 
-    // =========================================================================
-    // 💡 [New] 순정 체크아웃 및 하드 리셋 메서드 추가
-    // =========================================================================
-
     public void reset(Path repoPath, String targetHash) {
         try {
-            // 작업 폴더를 아예 해당 해시 시점으로 강제 리셋합니다.
             executeGitCommand(repoPath, "git", "reset", "--hard", targetHash);
             log.info("⏪ Reset current branch to commit: {}", targetHash);
         } catch (Exception e) {
@@ -236,20 +257,15 @@ public class GitService {
 
     public void checkoutCommit(Path repoPath, String targetHash) {
         try {
-            // 특정 해시(Detached HEAD)로 가거나, 다시 원래 브랜치 이름(master 등)으로 돌아오기 둘 다 가능합니다!
             executeGitCommand(repoPath, "git", "checkout", targetHash);
             log.info("🎯 Checked out to target: {} in {}", targetHash, repoPath);
         } catch (Exception e) {
-            throw new RuntimeException("체크아웃 실패 (저장하지 않은 변경사항이 있거나 충돌이 발생했습니다): " + e.getMessage());
+            throw new RuntimeException("체크아웃 실패: " + e.getMessage());
         }
     }
 
-    // =========================================================================
-    // 💡 3. History (소스트리 스타일 그래프 정렬 옵션 추가!)
-    // =========================================================================
     public List<Map<String, String>> getHistory(Path repoPath) {
         try {
-            // 💡 [핵심 해결책] 명령어에 "master"를 명시적으로 추가하여 master 브랜치를 무조건 왼쪽 기둥으로 고정합니다!
             String output = executeGitCommand(repoPath, "git", "log", "master", "--all", "--graph", "--topo-order", "--date-order", "--color=never", "--pretty=format:|*|%h|*|%an|*|%ad|*|%s|*|%d", "--date=short");
             List<Map<String, String>> history = new ArrayList<>();
 

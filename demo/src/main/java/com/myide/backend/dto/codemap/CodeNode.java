@@ -2,9 +2,11 @@ package com.myide.backend.dto.codemap;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 @Data
 @AllArgsConstructor
+@NoArgsConstructor
 public class CodeNode {
     private String id;
     private String label;

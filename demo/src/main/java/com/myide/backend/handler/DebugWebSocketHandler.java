@@ -6,12 +6,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.myide.backend.domain.LanguageType;
 import com.myide.backend.domain.Project;
 import com.myide.backend.domain.Workspace;
-import com.myide.backend.repository.WorkspaceRepository; // 💡 추가됨
-import com.myide.backend.service.WorkspaceService; // 💡 추가됨
+import com.myide.backend.repository.WorkspaceRepository;
+import com.myide.backend.service.WorkspaceService;
 import com.myide.backend.service.debug.DebugStrategy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+// 💡 [추가됨] 트랜잭션 처리를 위한 임포트
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
@@ -29,9 +31,11 @@ public class DebugWebSocketHandler extends TextWebSocketHandler {
 
     private final List<DebugStrategy> debugStrategies;
     private final ObjectMapper objectMapper;
-    private final WorkspaceService workspaceService; // 💡 공통 서비스 주입
-    private final WorkspaceRepository workspaceRepository; // 프로젝트를 효율적으로 찾기 위함
+    private final WorkspaceService workspaceService;
+    private final WorkspaceRepository workspaceRepository;
 
+    // 💡 [핵심 해결] 이 어노테이션이 DB 세션을 꽉 붙잡아줘서 Lazy 에러가 발생하지 않게 만듭니다!
+    @Transactional(readOnly = true)
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
         try {
@@ -45,16 +49,17 @@ public class DebugWebSocketHandler extends TextWebSocketHandler {
                 String branchName = json.has("branchName") ? json.get("branchName").asText() : "master";
                 String filePath = json.has("filePath") ? json.get("filePath").asText() : "";
 
-                // 💡 1. 실행 전 폴더 검증!
+                // 1. 실행 전 폴더 검증!
                 Path checkPath = workspaceService.getProjectPath(workspaceId, projectName, branchName);
                 if (!checkPath.toFile().exists()) {
                     throw new RuntimeException("디버깅할 프로젝트 경로를 찾을 수 없습니다: " + checkPath.toString());
                 }
 
-                // 💡 2. 성능 최적화: findAll() 대신 Workspace를 통해 해당 프로젝트 탐색
+                // 2. 성능 최적화: findAll() 대신 Workspace를 통해 해당 프로젝트 탐색
                 Workspace workspace = workspaceRepository.findById(workspaceId)
                         .orElseThrow(() -> new RuntimeException("워크스페이스를 찾을 수 없습니다."));
 
+                // ✨ @Transactional 덕분에 여기서 getProjects()를 호출해도 에러가 나지 않습니다!
                 Project project = workspace.getProjects().stream()
                         .filter(p -> p.getName().equals(projectName))
                         .findFirst()

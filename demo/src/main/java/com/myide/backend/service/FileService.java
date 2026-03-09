@@ -18,7 +18,9 @@ import java.util.stream.Stream;
 @RequiredArgsConstructor
 public class FileService {
 
-    private final WorkspaceService workspaceService; // 경로 계산을 위해 주입
+    private final WorkspaceService workspaceService;
+    // 💡 [추가] 캐시 무효화를 위해 CodeMapService 주입
+    private final CodeMapService codeMapService;
 
     public FileNode getFileTree(String workspaceId, String projectName, String branchName) {
         Path targetDir = workspaceService.getProjectPath(workspaceId, projectName, branchName);
@@ -41,6 +43,8 @@ public class FileService {
                 if(target.getParent() != null) Files.createDirectories(target.getParent());
                 Files.createFile(target);
             }
+            // ✨ 파일 생성 시 캐시 무효화 (다음 코드맵 갱신 시 재분석 유도)
+            codeMapService.invalidateCache(request.getWorkspaceId(), request.getProjectName(), request.getBranchName());
         } catch (IOException e) { throw new RuntimeException("파일 생성 실패: " + e.getMessage()); }
     }
 
@@ -50,12 +54,20 @@ public class FileService {
         try {
             if (target.getParent() != null && !Files.exists(target.getParent())) Files.createDirectories(target.getParent());
             Files.writeString(target, request.getCode(), StandardCharsets.UTF_8);
+
+            // ✨ 에디터에서 [Ctrl + S] 로 코드 저장 시 캐시 무효화
+            codeMapService.invalidateCache(request.getWorkspaceId(), request.getProjectName(), request.getBranchName());
         } catch (IOException e) { throw new RuntimeException("파일 저장 실패: " + e.getMessage()); }
     }
 
     public void deleteFile(FileRequest request) {
         Path target = workspaceService.getProjectPath(request.getWorkspaceId(), request.getProjectName(), request.getBranchName()).resolve(request.getFilePath());
-        try { FileSystemUtils.deleteRecursively(target); }
+        try {
+            FileSystemUtils.deleteRecursively(target);
+
+            // ✨ 파일 삭제 시 캐시 무효화
+            codeMapService.invalidateCache(request.getWorkspaceId(), request.getProjectName(), request.getBranchName());
+        }
         catch (IOException e) { throw new RuntimeException("삭제 실패", e); }
     }
 
@@ -63,7 +75,12 @@ public class FileService {
         Path root = workspaceService.getProjectPath(request.getWorkspaceId(), request.getProjectName(), request.getBranchName());
         Path oldPath = root.resolve(request.getFilePath());
         Path newPath = oldPath.getParent().resolve(request.getNewName());
-        try { Files.move(oldPath, newPath, StandardCopyOption.REPLACE_EXISTING); }
+        try {
+            Files.move(oldPath, newPath, StandardCopyOption.REPLACE_EXISTING);
+
+            // ✨ 파일명 변경 시 캐시 무효화
+            codeMapService.invalidateCache(request.getWorkspaceId(), request.getProjectName(), request.getBranchName());
+        }
         catch (IOException e) { throw new RuntimeException("이름 변경 실패", e); }
     }
 
