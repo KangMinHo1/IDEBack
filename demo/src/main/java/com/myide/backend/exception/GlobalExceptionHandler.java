@@ -66,4 +66,5 @@ public class GlobalExceptionHandler {
         log.error("알 수 없는 오류", ex);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("시스템 오류가 발생했습니다.");
     }
+
 }

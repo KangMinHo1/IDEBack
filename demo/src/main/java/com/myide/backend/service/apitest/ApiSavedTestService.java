@@ -1,7 +1,8 @@
-package com.myide.backend.service;
+package com.myide.backend.service.apitest;
 
 import com.myide.backend.domain.ApiSavedTest;
-import com.myide.backend.dto.*;
+import com.myide.backend.dto.apitest.SavedTestRequest;
+import com.myide.backend.dto.apitest.SavedTestResponse;
 import com.myide.backend.repository.ApiSavedTestRepository;
 import org.springframework.stereotype.Service;
 

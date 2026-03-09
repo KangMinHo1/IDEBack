@@ -1,4 +1,4 @@
-package com.myide.backend.dto;
+package com.myide.backend.dto.apitest;
 
 import lombok.*;
 

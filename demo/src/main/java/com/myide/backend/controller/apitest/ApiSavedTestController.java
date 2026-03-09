@@ -1,8 +1,8 @@
-package com.myide.backend.controller;
+package com.myide.backend.controller.apitest;
 
-import com.myide.backend.dto.SavedTestRequest;
-import com.myide.backend.dto.SavedTestResponse;
-import com.myide.backend.service.ApiSavedTestService;
+import com.myide.backend.dto.apitest.SavedTestRequest;
+import com.myide.backend.dto.apitest.SavedTestResponse;
+import com.myide.backend.service.apitest.ApiSavedTestService;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;

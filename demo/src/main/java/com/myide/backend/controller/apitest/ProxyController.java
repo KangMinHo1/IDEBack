@@ -1,8 +1,8 @@
-package com.myide.backend.controller;
+package com.myide.backend.controller.apitest;
 
-import com.myide.backend.dto.ProxyRequest;
-import com.myide.backend.dto.ProxyResponse;
-import com.myide.backend.service.ProxyService;
+import com.myide.backend.dto.apitest.ProxyRequest;
+import com.myide.backend.dto.apitest.ProxyResponse;
+import com.myide.backend.service.apitest.ProxyService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
 

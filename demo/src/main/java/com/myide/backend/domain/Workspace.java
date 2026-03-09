@@ -6,8 +6,12 @@ import lombok.*;
 import java.util.ArrayList;
 import java.util.List;
 
+import java.time.LocalDateTime;
+import com.myide.backend.domain.WorkspaceType;
+
 @Entity
 @Getter
+@Setter
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
@@ -27,4 +31,20 @@ public class Workspace {
     @OneToMany(mappedBy = "workspace", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
     private List<Project> projects = new ArrayList<>();
+
+    // ✅ 개인 / 팀 구분
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    @Builder.Default
+    private WorkspaceType type = WorkspaceType.PERSONAL;
+
+    // ✅ 팀 워크스페이스일 때 팀명
+    private String teamName;
+
+    // ✅ 최근 수정일
+    @Column(nullable = false)
+    @Builder.Default
+    private LocalDateTime updatedAt = LocalDateTime.now();
+
+
 }
