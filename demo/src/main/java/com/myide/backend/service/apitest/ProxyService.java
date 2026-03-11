@@ -25,34 +25,31 @@ public class ProxyService {
     public ProxyResponse forward(ProxyRequest req) {
         long startNs = System.nanoTime();
 
-        // ✅ SSRF 최소 방어
-        SsrfGuard.validateTargetUrl(req.getUrl());
+        try {
+            SsrfGuard.validateTargetUrl(req.getUrl());
 
-        HttpMethod method = normalize(req.getMethod());
-        if (method == null) throw new IllegalArgumentException("invalid method");
+            HttpMethod method = normalize(req.getMethod());
+            if (method == null) throw new IllegalArgumentException("invalid method");
 
-        HttpHeaders headers = new HttpHeaders();
-        headers.setAccept(List.of(MediaType.APPLICATION_JSON, MediaType.ALL));
+            HttpHeaders headers = new HttpHeaders();
+            headers.setAccept(List.of(MediaType.APPLICATION_JSON, MediaType.ALL));
 
-        // 프론트에서 넘어온 헤더 추가
-        if (req.getHeaders() != null) {
-            req.getHeaders().forEach((k, v) -> {
-                if (k != null && !k.isBlank() && v != null) headers.add(k, v);
-            });
-        }
+            if (req.getHeaders() != null) {
+                req.getHeaders().forEach((k, v) -> {
+                    if (k != null && !k.isBlank() && v != null) headers.add(k, v);
+                });
+            }
 
-        // 바디 있는 메서드면 content-type 기본값
-        boolean hasBodyMethod = (method != HttpMethod.GET && method != HttpMethod.HEAD);
-        String body = req.getBody();
-        if (hasBodyMethod) {
-            if (!headers.containsKey(HttpHeaders.CONTENT_TYPE)) {
+            boolean hasBodyMethod = (method != HttpMethod.GET && method != HttpMethod.HEAD);
+            String body = req.getBody();
+            if (hasBodyMethod && !headers.containsKey(HttpHeaders.CONTENT_TYPE)) {
                 headers.setContentType(MediaType.APPLICATION_JSON);
             }
-        }
 
-        HttpEntity<String> entity = hasBodyMethod ? new HttpEntity<>(body, headers) : new HttpEntity<>(headers);
+            HttpEntity<String> entity = hasBodyMethod
+                    ? new HttpEntity<>(body, headers)
+                    : new HttpEntity<>(headers);
 
-        try {
             ResponseEntity<byte[]> upstream = restTemplate.exchange(
                     req.getUrl(),
                     method,
@@ -62,19 +59,15 @@ public class ProxyService {
 
             long timeMs = (System.nanoTime() - startNs) / 1_000_000;
             Object parsed = parseJsonIfPossible(upstream.getBody());
-
             return new ProxyResponse(upstream.getStatusCode().value(), parsed, timeMs);
 
         } catch (HttpStatusCodeException e) {
-            // ✅ 업스트림이 4xx/5xx를 줘도 "프록시 실패(502)"로 바꾸지 말고 그대로 전달
             long timeMs = (System.nanoTime() - startNs) / 1_000_000;
             byte[] raw = e.getResponseBodyAsByteArray();
             Object parsed = parseJsonIfPossible(raw);
-
             return new ProxyResponse(e.getStatusCode().value(), parsed, timeMs);
 
         } catch (Exception e) {
-            // ✅ 진짜 네트워크/인증서/연결 실패 같은 케이스만 502
             long timeMs = (System.nanoTime() - startNs) / 1_000_000;
             Map<String, Object> err = new LinkedHashMap<>();
             err.put("message", "proxy failed");

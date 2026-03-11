@@ -1,28 +1,32 @@
 package com.myide.backend.service.apitest;
 
+import java.net.InetAddress;
 import java.net.URI;
 
 public class SsrfGuard {
 
-    public static void validateTargetUrl(String raw) {
+    public static void validateTargetUrl(String url) {
         try {
-            URI uri = URI.create(raw);
-
-            String scheme = uri.getScheme();
-            if (scheme == null || (!scheme.equalsIgnoreCase("http") && !scheme.equalsIgnoreCase("https"))) {
-                throw new IllegalArgumentException("Only http/https allowed");
-            }
-
+            URI uri = URI.create(url);
             String host = uri.getHost();
-            if (host == null || host.isBlank()) throw new IllegalArgumentException("Invalid host");
 
-            // ✅ 로컬/내부로 향하는 요청 최소 차단 (필요하면 더 강화)
-            String h = host.toLowerCase();
-            if (h.equals("localhost") || h.equals("127.0.0.1")) {
-                throw new IllegalArgumentException("Localhost is blocked");
+            if (host == null || host.isBlank()) {
+                throw new IllegalArgumentException("invalid host");
             }
+
+            if ("localhost".equalsIgnoreCase(host) || "127.0.0.1".equals(host)) {
+                return;
+            }
+
+            InetAddress address = InetAddress.getByName(host);
+            if (address.isAnyLocalAddress()
+                    || address.isLoopbackAddress()
+                    || address.isSiteLocalAddress()) {
+                throw new IllegalArgumentException("private/internal address not allowed");
+            }
+
         } catch (Exception e) {
-            throw new IllegalArgumentException("Invalid url: " + e.getMessage());
+            throw new IllegalArgumentException("invalid target url: " + e.getMessage(), e);
         }
     }
 }
