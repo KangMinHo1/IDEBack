@@ -3,6 +3,8 @@ package com.myide.backend.controller;
 import com.myide.backend.domain.workspace.Workspace;
 import com.myide.backend.dto.workspace.InviteMemberRequest;
 import com.myide.backend.dto.workspace.WorkspaceCreateRequest;
+import com.myide.backend.dto.workspace.WorkspaceInvitationResponse;
+import com.myide.backend.dto.workspace.WorkspaceMemberResponse;
 import com.myide.backend.service.WorkspaceService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -63,5 +65,20 @@ public class WorkspaceController {
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(e.getMessage());
         }
+    }
+
+    // 💡 [신규 추가] 대기 중인 초대 목록 조회 API
+    @GetMapping("/invitations")
+    public ResponseEntity<List<WorkspaceInvitationResponse>> getPendingInvitations(@RequestParam Long userId) {
+        // WorkspaceService 쪽에 getPendingInvitations(userId) 메서드를 구현해주셔야 합니다!
+        // (유저의 초대장 DB 테이블이나 연관관계를 조회해서 리스트로 반환하는 로직)
+        return ResponseEntity.ok(workspaceService.getPendingInvitations(userId));
+    }
+
+
+    // 💡  워크스페이스 팀원 목록 조회 API
+    @GetMapping("/{workspaceId}/members")
+    public ResponseEntity<List<WorkspaceMemberResponse>> getWorkspaceMembers(@PathVariable String workspaceId) {
+        return ResponseEntity.ok(workspaceService.getWorkspaceMembers(workspaceId));
     }
 }

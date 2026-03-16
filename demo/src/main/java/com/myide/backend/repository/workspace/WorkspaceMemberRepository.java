@@ -18,4 +18,10 @@ public interface WorkspaceMemberRepository extends JpaRepository<WorkspaceMember
 
     // 워크스페이스와 유저 객체를 받아서 존재하는지 확인하는 메서드
     boolean existsByWorkspaceAndUser(Workspace workspace, User user);
+
+    // 💡  특정 유저의 특정 상태(PENDING 등)인 초대 내역 찾기
+    List<WorkspaceMember> findByUser_IdAndStatus(Long userId, WorkspaceMember.JoinStatus status);
+
+    // 💡  특정 워크스페이스에서 수락(ACCEPTED) 상태인 멤버 목록 조회
+    List<WorkspaceMember> findByWorkspace_UuidAndStatus(String workspaceId, WorkspaceMember.JoinStatus status);
 }

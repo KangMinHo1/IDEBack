@@ -12,8 +12,8 @@ import com.myide.backend.domain.CodeMapCache;
 import com.myide.backend.domain.CodeSummary;
 import com.myide.backend.dto.codemap.CreateComponentRequest;
 import com.myide.backend.dto.codemap.CreateRelationRequest;
-// 💡 [핵심] 회원님의 응답 DTO 임포트
 import com.myide.backend.dto.codemap.CodeMapResponse;
+import com.myide.backend.dto.codemap.CodeGenerateRequest; // 💡 임포트 추가
 import com.myide.backend.repository.codemap.CodeMapCacheRepository;
 import com.myide.backend.repository.codemap.CodeSummaryRepository;
 import com.myide.backend.service.analyzer.JavaAnalyzer;
@@ -51,35 +51,24 @@ public class CodeMapService {
     public CodeMapResponse getAnalyzedCodeMap(String workspaceId, String projectName, String branchName) {
         String safeBranch = branchName == null ? "master" : branchName;
 
-        // 1. 첫 번째 캐시 확인
         Optional<CodeMapCache> cachedData = codeMapCacheRepository.findByWorkspaceIdAndProjectNameAndBranchName(workspaceId, projectName, safeBranch);
 
         if (cachedData.isPresent()) {
             try {
                 log.info("⚡ [CodeMap] 캐시 히트! DB 데이터를 DTO로 역직렬화하여 반환합니다.");
-
-                // ✅ [정석] JSON 문자열을 CodeMapResponse 객체로 즉시 변환
-                // (DTO에 @NoArgsConstructor가 추가되었으므로 이제 에러 없이 동작합니다.)
                 return objectMapper.readValue(cachedData.get().getMapDataJson(), CodeMapResponse.class);
-
             } catch (Exception e) {
                 log.warn("🚨 캐시 역직렬화 실패! 망가진 데이터를 삭제하고 재분석을 진행합니다.", e);
                 codeMapCacheRepository.delete(cachedData.get());
                 codeMapCacheRepository.flush();
-                // 아래 '캐시 미스' 로직으로 자연스럽게 넘어갑니다.
             }
         }
 
         log.info("🐢 [CodeMap] 캐시 미스! 전체 파일 파싱을 시작합니다.");
-
-        // 2. 무거운 파싱 작업 수행
         CodeMapResponse analyzedData = doAnalyzeWorkspace(workspaceId, projectName, safeBranch);
 
-        // 3. 파싱 결과를 JSON으로 직렬화하여 DB에 저장
         try {
             String json = objectMapper.writeValueAsString(analyzedData);
-
-            // Double-Check: 저장 직전 동시성 확인
             Optional<CodeMapCache> doubleCheck = codeMapCacheRepository.findByWorkspaceIdAndProjectNameAndBranchName(workspaceId, projectName, safeBranch);
 
             if (doubleCheck.isPresent()) {
@@ -108,7 +97,6 @@ public class CodeMapService {
         codeMapCacheRepository.deleteByWorkspaceIdAndProjectNameAndBranchName(workspaceId, projectName, safeBranch);
     }
 
-    // 반환 타입을 CodeMapResponse로 맞춤
     private CodeMapResponse doAnalyzeWorkspace(String workspaceId, String projectName, String branchName) {
         Path projectPath = workspaceService.getProjectPath(workspaceId, projectName, branchName);
         return javaAnalyzer.analyze(projectPath.toString());
@@ -162,7 +150,7 @@ public class CodeMapService {
     @Transactional
     public void createRelation(CreateRelationRequest req) {
         String sourceFileName = req.getSourceNode().endsWith(".java") ? req.getSourceNode() : req.getSourceNode() + ".java";
-        String targetPath = req.getTargetNode(); // 예: "com/myide/PaymentProcessor.java"
+        String targetPath = req.getTargetNode();
 
         Path projectPath = workspaceService.getProjectPath(req.getWorkspaceId(), req.getProjectName(), req.getBranchName());
         Path sourcePath = projectPath.resolve(sourceFileName);
@@ -174,7 +162,6 @@ public class CodeMapService {
             CompilationUnit cu = StaticJavaParser.parse(sourcePath);
             String pureTargetClassName = targetFileFullPath.getFileName().toString().replace(".java", "");
 
-            // ✨ [패키지 추적 로직] 대상 파일의 패키지 선언문을 읽어옵니다.
             String targetFqcn = pureTargetClassName;
             if (Files.exists(targetFileFullPath)) {
                 CompilationUnit targetCu = StaticJavaParser.parse(targetFileFullPath);
@@ -186,7 +173,6 @@ public class CodeMapService {
                 }
             }
 
-            // ✨ Import 자동 삽입 (이미 있으면 중복 삽입 안 함)
             final String finalFqcn = targetFqcn;
             boolean importExists = cu.getImports().stream()
                     .anyMatch(i -> i.getNameAsString().equals(finalFqcn));
@@ -196,7 +182,6 @@ public class CodeMapService {
                 log.info("➕ [CodeMap] 정확한 패키지 경로로 Import 추가: {}", finalFqcn);
             }
 
-            // 클래스 본문 수정 로직
             TypeDeclaration<?> typeDecl = cu.getPrimaryType().orElse(cu.getTypes().isEmpty() ? null : cu.getType(0));
             if (typeDecl != null && typeDecl.isClassOrInterfaceDeclaration()) {
                 ClassOrInterfaceDeclaration classDecl = typeDecl.asClassOrInterfaceDeclaration();
@@ -229,7 +214,6 @@ public class CodeMapService {
     public void deleteRelation(CreateRelationRequest req) {
         String sourceFileName = req.getSourceNode().endsWith(".java") ? req.getSourceNode() : req.getSourceNode() + ".java";
 
-        // 1. 이름 정제
         String rawTarget = req.getTargetNode().replace(".java", "");
         if (rawTarget.contains("/")) {
             rawTarget = rawTarget.substring(rawTarget.lastIndexOf('/') + 1);
@@ -245,7 +229,6 @@ public class CodeMapService {
 
             log.info("🔍 [수사 시작] Main클래스의 상속/필드에서 {}를 찾아 삭제 시도", pureTargetName);
 
-            // ✨ [핵심 1] Import 문 삭제 시도
             List<ImportDeclaration> targetImports = cu.getImports().stream()
                     .filter(i -> i.getNameAsString().contains(pureTargetName))
                     .collect(Collectors.toList());
@@ -255,27 +238,22 @@ public class CodeMapService {
                 log.info("✂️ [CodeMap] Import 문 제거 완료");
             }
 
-            // ✨ [핵심 2] 클래스 내부 구성 요소 삭제
             for (TypeDeclaration<?> type : cu.getTypes()) {
                 if (!type.isClassOrInterfaceDeclaration()) continue;
                 ClassOrInterfaceDeclaration classDecl = type.asClassOrInterfaceDeclaration();
 
-                // A. 상속(Extends) 제거
-                // 💡 [수정] removeIf 결과가 하나라도 true면 isModified를 true로!
                 boolean removedExtends = classDecl.getExtendedTypes().removeIf(t -> t.getNameAsString().contains(pureTargetName));
                 if (removedExtends) {
                     isModified = true;
                     log.info("✂️ [CodeMap] 상속(extends {}) 문구 제거 성공", pureTargetName);
                 }
 
-                // B. 구현(Implements) 제거
                 boolean removedImplements = classDecl.getImplementedTypes().removeIf(t -> t.getNameAsString().contains(pureTargetName));
                 if (removedImplements) {
                     isModified = true;
                     log.info("✂️ [CodeMap] 구현(implements {}) 문구 제거 성공", pureTargetName);
                 }
 
-                // C. 필드 변수 제거
                 List<FieldDeclaration> fieldsToRemove = classDecl.getFields().stream()
                         .filter(f -> f.toString().contains(pureTargetName))
                         .collect(Collectors.toList());
@@ -286,7 +264,6 @@ public class CodeMapService {
                 }
             }
 
-            // ✨ [최종 결과] 하나라도 지워졌다면 파일 저장 및 캐시 파괴!
             if (isModified) {
                 Files.writeString(sourcePath, cu.toString(), StandardCharsets.UTF_8);
                 log.info("✅ [CodeMap] 코드 수정 완료 및 파일 저장됨!");
@@ -299,6 +276,83 @@ public class CodeMapService {
             throw new RuntimeException("관계 삭제 조작 중 오류: " + e.getMessage(), e);
         }
     }
+
+    // =========================================================================
+    // 💡 [업그레이드] 멤버 변수 / 멤버 메서드 동적 생성 로직 (값, 파라미터, 바디 지원)
+    // =========================================================================
+    @Transactional
+    public void generateCodeComponent(CodeGenerateRequest req) {
+        try {
+            Path projectPath = workspaceService.getProjectPath(req.getWorkspaceId(), req.getProjectName(), req.getBranchName());
+            String fileName = req.getClassName().endsWith(".java") ? req.getClassName() : req.getClassName() + ".java";
+            Path targetFile = projectPath.resolve(fileName);
+
+            if (!Files.exists(targetFile)) {
+                throw new IllegalArgumentException("대상 파일을 찾을 수 없습니다: " + fileName);
+            }
+
+            CompilationUnit cu = StaticJavaParser.parse(targetFile);
+            String pureClassName = req.getClassName().replace(".java", "");
+            ClassOrInterfaceDeclaration targetClass = cu.getClassByName(pureClassName)
+                    .orElseThrow(() -> new IllegalArgumentException("파일 내부에 클래스가 존재하지 않습니다: " + pureClassName));
+
+            Modifier.Keyword modifier = Modifier.Keyword.valueOf(req.getAccessModifier().toUpperCase());
+
+            // 💡 [1] 변수 추가 로직
+            if ("VARIABLE".equalsIgnoreCase(req.getTargetType())) {
+                if (targetClass.getFieldByName(req.getName()).isPresent()) {
+                    throw new RuntimeException("이미 존재하는 변수명입니다: " + req.getName());
+                }
+
+                FieldDeclaration field = targetClass.addField(req.getDataType(), req.getName(), modifier);
+
+                // ✨ 초기값이 입력되었다면 세팅해줍니다. (예: = 100;)
+                if (req.getInitialValue() != null && !req.getInitialValue().trim().isEmpty()) {
+                    field.getVariable(0).setInitializer(req.getInitialValue());
+                }
+                log.info("✅ [CodeMap] 변수 추가 완료: {} {} {}", req.getAccessModifier(), req.getDataType(), req.getName());
+
+                // 💡 [2] 메서드 추가 로직
+            } else if ("METHOD".equalsIgnoreCase(req.getTargetType())) {
+                if (!targetClass.getMethodsByName(req.getName()).isEmpty()) {
+                    throw new RuntimeException("동일한 이름의 메서드가 이미 존재합니다.");
+                }
+
+                com.github.javaparser.ast.body.MethodDeclaration method = targetClass.addMethod(req.getName(), modifier)
+                        .setType(req.getDataType());
+
+                // ✨ 파라미터가 있다면 콤마(,)로 분리해서 파싱 후 주입합니다.
+                if (req.getParameters() != null && !req.getParameters().trim().isEmpty()) {
+                    String[] params = req.getParameters().split(",");
+                    for (String param : params) {
+                        if (!param.trim().isEmpty()) {
+                            method.addParameter(StaticJavaParser.parseParameter(param.trim()));
+                        }
+                    }
+                }
+
+                // ✨ 메서드 내부 코드(Body)가 있다면 주입하고, 없으면 빈 괄호 {}를 넣습니다.
+                String bodyCode = "{}";
+                if (req.getBody() != null && !req.getBody().trim().isEmpty()) {
+                    bodyCode = "{\n" + req.getBody() + "\n}";
+                }
+                method.setBody(StaticJavaParser.parseBlock(bodyCode));
+
+                log.info("✅ [CodeMap] 메서드 추가 완료: {} {} {}()", req.getAccessModifier(), req.getDataType(), req.getName());
+
+            } else {
+                throw new IllegalArgumentException("지원하지 않는 타겟 타입입니다.");
+            }
+
+            Files.writeString(targetFile, cu.toString(), StandardCharsets.UTF_8);
+            invalidateCache(req.getWorkspaceId(), req.getProjectName(), req.getBranchName());
+
+        } catch (Exception e) {
+            log.error("코드 생성 중 오류 발생: ", e);
+            throw new RuntimeException("코드 주입 실패: " + e.getMessage(), e);
+        }
+    }
+
 
     // =========================================================================
     // 💡 AI 요약 관련 로직

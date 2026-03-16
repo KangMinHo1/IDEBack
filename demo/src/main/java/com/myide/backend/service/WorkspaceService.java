@@ -6,6 +6,8 @@ import com.myide.backend.domain.workspace.WorkspaceMember;
 import com.myide.backend.domain.workspace.WorkspaceType;
 import com.myide.backend.dto.workspace.InviteMemberRequest;
 import com.myide.backend.dto.workspace.WorkspaceCreateRequest;
+import com.myide.backend.dto.workspace.WorkspaceInvitationResponse;
+import com.myide.backend.dto.workspace.WorkspaceMemberResponse;
 import com.myide.backend.repository.UserRepository;
 import com.myide.backend.repository.workspace.WorkspaceMemberRepository;
 import com.myide.backend.repository.workspace.WorkspaceRepository;
@@ -19,6 +21,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -132,6 +135,41 @@ public class WorkspaceService {
                 .orElseThrow(() -> new IllegalArgumentException("초대 내역이 존재하지 않습니다."));
 
         workspaceMemberRepository.delete(member);
+    }
+
+    // =========================================================================
+    // 💡 [신규 추가] 나에게 온 대기 중인 초대 목록 조회 로직
+    // =========================================================================
+    @Transactional(readOnly = true)
+    public List<WorkspaceInvitationResponse> getPendingInvitations(Long userId) {
+        // 1. 유저 ID와 'PENDING(대기 중)' 상태를 기준으로 멤버 테이블 조회
+        List<WorkspaceMember> pendingMembers = workspaceMemberRepository.findByUser_IdAndStatus(userId, WorkspaceMember.JoinStatus.PENDING);
+
+        // 2. 조회된 엔티티 리스트를 프론트엔드가 렌더링하기 편한 DTO 리스트로 변환
+        return pendingMembers.stream()
+                .map(member -> WorkspaceInvitationResponse.builder()
+                        .workspaceId(member.getWorkspace().getUuid())
+                        .workspaceName(member.getWorkspace().getName())
+                        .build())
+                .collect(Collectors.toList());
+    }
+
+    // =========================================================================
+    // 💡 [신규 추가] 특정 워크스페이스의 실제 참여 팀원 목록 조회
+    // =========================================================================
+    @Transactional(readOnly = true)
+    public List<WorkspaceMemberResponse> getWorkspaceMembers(String workspaceId) {
+        // 해당 워크스페이스에서 'ACCEPTED(수락됨)' 상태인 멤버만 가져옵니다. (방장도 포함)
+        List<WorkspaceMember> members = workspaceMemberRepository.findByWorkspace_UuidAndStatus(workspaceId, WorkspaceMember.JoinStatus.ACCEPTED);
+
+        return members.stream()
+                .map(member -> WorkspaceMemberResponse.builder()
+                        .userId(member.getUser().getId())
+                        .email(member.getUser().getEmail())
+                        .nickname(member.getUser().getNickname())
+                        .role(member.getRole().name())
+                        .build())
+                .collect(Collectors.toList());
     }
 
     // 💡 [수정] String이 아닌 Long 타입으로 파라미터를 변경하고 try-catch를 걷어냅니다.
