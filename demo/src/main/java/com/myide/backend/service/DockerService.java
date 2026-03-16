@@ -10,6 +10,7 @@ import com.github.dockerjava.api.model.Ports;
 import com.github.dockerjava.core.command.AttachContainerResultCallback;
 import com.github.dockerjava.core.command.WaitContainerResultCallback;
 import com.myide.backend.domain.LanguageType;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
@@ -21,6 +22,7 @@ import org.springframework.web.socket.WebSocketSession;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
@@ -31,7 +33,6 @@ import java.util.function.Consumer;
 public class DockerService {
 
     private final DockerClient dockerClient;
-    // 💡 Repository를 빼고 WorkspaceService를 넣습니다!
     private final WorkspaceService workspaceService;
 
     private final Map<String, PipedOutputStream> runInputMap = new ConcurrentHashMap<>();
@@ -39,7 +40,19 @@ public class DockerService {
     private final Map<String, String> terminalContainerMap = new ConcurrentHashMap<>();
     private final Map<String, PipedOutputStream> terminalInputMap = new ConcurrentHashMap<>();
 
-    // 💡 [핵심 수정] 이제 복잡한 계산 없이 공통 서비스의 경로를 그대로 가져와서 문자열로 바꿔주기만 합니다!
+    // 💡 [추가] 서버가 켜질 때 딱 한 번 실행되는 찌꺼기 컨테이너 청소기
+    @PostConstruct
+    public void cleanUpZombieContainers() {
+        log.info("🧹 서버 시작: 남아있는 낡은 IDE 컨테이너들을 청소합니다...");
+        try {
+            dockerClient.listContainersCmd().withShowAll(true).exec().stream()
+                    .filter(c -> Arrays.toString(c.getNames()).contains("ide-execution-env"))
+                    .forEach(c -> dockerClient.removeContainerCmd(c.getId()).withForce(true).exec());
+        } catch (Exception e) {
+            log.warn("초기 컨테이너 청소 실패", e);
+        }
+    }
+
     private String calculateHostPath(String workspaceId, String projectName, String branchName) {
         return workspaceService.getProjectPath(workspaceId, projectName, branchName).toString();
     }
@@ -309,7 +322,6 @@ public class DockerService {
 
     // --- [Track 4] Build Support ---
     public void buildAndCopy(String workspaceId, String cmd, String containerFilePath, String hostFilePath) {
-        // 💡 [수정] 빌드 과정에서도 WorkspaceService를 통해 경로를 가져오도록 수정
         Path hostWorkspacePath = workspaceService.getProjectPath(workspaceId, "", "master").getParent();
         String containerId = null;
         try {

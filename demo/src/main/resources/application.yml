@@ -7,6 +7,9 @@ spring:
     name: my-web-ide
   config:
     import: "classpath:application-secret.yml" # 💡 핵심: 시작할 때 secret 파일을 불러와서 합칩니다.
+  jackson:
+    mapper:
+      accept-case-insensitive-enums: true  # 💡 Enum을 받을 때 대소문자를 무시합니다!
 
   # (나머지 기존 DB 설정 등은 그대로 둡니다)
 
@@ -33,8 +36,12 @@ spring:
       max-file-size: 100MB
       max-request-size: 100MB
 
-# 커스텀 설정
-ide:
-  docker:
-    host: tcp://localhost:2375
-    workspace-path: ./temp-workspace
+  # 커스텀 설정
+  ide:
+    docker:
+      host: tcp://localhost:2375
+      workspace-path: ./temp-workspace
+
+jwt:
+  secret: aW52YWxpZC1zZWNyZXQta2V5LXRlc3QtdmFsdWUtZm9yLWNhcHN0b25lLXByb2plY3Q=
+  expiration: 86400000 # 24시간 (밀리초)

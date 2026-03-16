@@ -1,16 +1,16 @@
 package com.myide.backend.domain;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.myide.backend.domain.workspace.Workspace;
 import jakarta.persistence.*;
 import lombok.*;
 import java.time.LocalDateTime;
 
 @Entity
 @Getter
-@Setter
 @Builder
 @NoArgsConstructor
-
+@Setter
 @AllArgsConstructor
 public class Project {
 
@@ -47,4 +47,5 @@ public class Project {
     public String getFolderName() {
         return this.name;
     }
+
 }

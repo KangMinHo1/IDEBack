@@ -1,4 +1,4 @@
-package com.myide.backend.dto;
+package com.myide.backend.dto.ide;
 
 import lombok.Builder;
 import lombok.Data;

@@ -1,6 +1,6 @@
 package com.myide.backend.controller;
 
-import com.myide.backend.dto.FileRequest;
+import com.myide.backend.dto.ide.FileRequest;
 import com.myide.backend.service.GitService;
 import com.myide.backend.service.ProjectService;
 import com.myide.backend.service.WorkspaceService;

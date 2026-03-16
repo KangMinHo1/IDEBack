@@ -2,10 +2,10 @@ package com.myide.backend.service;
 
 import com.myide.backend.domain.LanguageType;
 import com.myide.backend.domain.Project;
-import com.myide.backend.domain.Workspace;
-import com.myide.backend.dto.BuildRequest;
+import com.myide.backend.domain.workspace.Workspace;
+import com.myide.backend.dto.ide.BuildRequest;
 import com.myide.backend.repository.ProjectRepository;
-import com.myide.backend.repository.WorkspaceRepository;
+import com.myide.backend.repository.workspace.WorkspaceRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 

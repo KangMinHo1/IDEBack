@@ -12,10 +12,10 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 @Table(name = "code_summary", uniqueConstraints = {
-        // 동일한 파일에 대한 중복 저장을 막기 위한 복합 유니크 제약 조건
-        @UniqueConstraint(columnNames = {"workspaceId", "projectName", "branchName", "filePath"})
+        // 💡 [수정] 동일한 파일에 대한 중복 저장을 막기 위한 스네이크 케이스 복합 유니크 제약 조건
+        @UniqueConstraint(columnNames = {"workspace_id", "project_name", "branch_name", "file_path"})
 })
-public class CodeSummary { //코드맵 상세보기 AI 3줄요약
+public class CodeSummary {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -33,7 +33,7 @@ public class CodeSummary { //코드맵 상세보기 AI 3줄요약
     @Column(nullable = false)
     private String filePath; // 예: src/main/java/com/.../Main.java
 
-    // 💡 [핵심] 파일 내용의 암호화된 해시값 (내용이 1글자라도 바뀌면 이 값이 달라짐)
+    // 파일 내용의 암호화된 해시값 (내용이 1글자라도 바뀌면 이 값이 달라짐)
     @Column(nullable = false)
     private String fileHash;
 
@@ -41,7 +41,7 @@ public class CodeSummary { //코드맵 상세보기 AI 3줄요약
     @Column(columnDefinition = "TEXT")
     private String summaryText;
 
-    // 💡 더티 체킹(Dirty Checking)을 위한 업데이트 메서드
+    // 더티 체킹(Dirty Checking)을 위한 업데이트 메서드
     public void updateSummary(String newHash, String newSummaryText) {
         this.fileHash = newHash;
         this.summaryText = newSummaryText;

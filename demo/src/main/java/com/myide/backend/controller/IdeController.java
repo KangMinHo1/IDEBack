@@ -1,9 +1,13 @@
 package com.myide.backend.controller;
 
-import com.myide.backend.dto.*;
+import com.myide.backend.dto.ide.BuildRequest;
+import com.myide.backend.dto.ide.FileNode;
+import com.myide.backend.dto.ide.FileRequest;
+import com.myide.backend.dto.project.CreateProjectRequest;
 import com.myide.backend.service.BuildService;
 import com.myide.backend.service.FileService;
 import com.myide.backend.service.ProjectService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
@@ -42,31 +46,31 @@ public class IdeController {
     }
 
     @PostMapping("/project")
-    public ResponseEntity<String> createProject(@RequestBody CreateProjectRequest request) {
+    public ResponseEntity<String> createProject(@RequestBody @Valid CreateProjectRequest request) {
         projectService.createNewProject(request);
         return ResponseEntity.ok("프로젝트 생성됨");
     }
 
     @PostMapping("/files")
-    public ResponseEntity<String> createFile(@RequestBody FileRequest request) {
+    public ResponseEntity<String> createFile(@RequestBody @Valid FileRequest request) {
         fileService.createFile(request);
         return ResponseEntity.ok("생성됨");
     }
 
     @PostMapping("/save")
-    public ResponseEntity<String> saveFile(@RequestBody FileRequest request) {
+    public ResponseEntity<String> saveFile(@RequestBody @Valid FileRequest request) {
         fileService.saveFile(request);
         return ResponseEntity.ok("저장됨");
     }
 
     @DeleteMapping("/files")
-    public ResponseEntity<String> deleteFile(@RequestBody FileRequest request) {
+    public ResponseEntity<String> deleteFile(@RequestBody @Valid FileRequest request) {
         fileService.deleteFile(request);
         return ResponseEntity.ok("삭제됨");
     }
 
     @PutMapping("/files/rename")
-    public ResponseEntity<String> renameFile(@RequestBody FileRequest request) {
+    public ResponseEntity<String> renameFile(@RequestBody @Valid FileRequest request) {
         fileService.renameFile(request);
         return ResponseEntity.ok("변경됨");
     }

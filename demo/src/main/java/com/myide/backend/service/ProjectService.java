@@ -2,15 +2,16 @@ package com.myide.backend.service;
 
 import com.myide.backend.domain.LanguageType;
 import com.myide.backend.domain.Project;
-import com.myide.backend.domain.Workspace;
-import com.myide.backend.dto.CreateProjectRequest;
-import com.myide.backend.dto.FileNode;
-import com.myide.backend.dto.FileRequest;
+import com.myide.backend.domain.workspace.Workspace;
+import com.myide.backend.dto.project.CreateProjectRequest;
+import com.myide.backend.dto.ide.FileNode;
+import com.myide.backend.dto.ide.FileRequest;
 import com.myide.backend.repository.ProjectRepository;
-import com.myide.backend.repository.WorkspaceRepository;
+import com.myide.backend.repository.workspace.WorkspaceRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.FileSystemUtils;
 
 import java.io.IOException;
 import java.nio.file.*;
@@ -54,15 +55,21 @@ public class ProjectService {
         return rootNode;
     }
 
+    // 💡 1. 트랜잭션 보장 필수!
+    @Transactional
     public void createNewProject(CreateProjectRequest request) {
-        Workspace workspace = workspaceRepository.findById(request.getWorkspaceId()).orElseThrow();
-        Path projectRoot = Paths.get(workspace.getPath(), request.getProjectName());
+        Workspace workspace = workspaceRepository.findById(request.getWorkspaceId())
+                .orElseThrow(() -> new RuntimeException("워크스페이스를 찾을 수 없습니다."));
 
-        // 💡 [수정됨] 프로젝트의 메인 폴더 이름을 'master'로 생성합니다!
+        Path projectRoot = Paths.get(workspace.getPath(), request.getProjectName());
         Path masterRepoPath = projectRoot.resolve("master");
 
+        if (Files.exists(projectRoot)) {
+            throw new RuntimeException("이미 존재하는 프로젝트입니다.");
+        }
+
         try {
-            if (Files.exists(projectRoot)) throw new RuntimeException("이미 존재하는 프로젝트입니다.");
+            // 1. 파일 시스템 작업 (폴더, 템플릿, Git 초기화)
             Files.createDirectories(masterRepoPath);
             createTemplateFiles(masterRepoPath, request.getLanguage());
             gitService.createRepository(masterRepoPath);
@@ -71,10 +78,26 @@ public class ProjectService {
                 gitService.addRemote(masterRepoPath, request.getGitUrl());
             }
 
+            // 2. DB 저장 작업
             projectRepository.save(Project.builder()
-                    .name(request.getProjectName()).description(request.getDescription())
-                    .language(request.getLanguage()).gitUrl(request.getGitUrl()).workspace(workspace).build());
-        } catch (IOException e) { throw new RuntimeException("프로젝트 생성 실패: " + e.getMessage()); }
+                    .name(request.getProjectName())
+                    .description(request.getDescription())
+                    .language(request.getLanguage())
+                    .gitUrl(request.getGitUrl())
+                    .workspace(workspace)
+                    .build());
+
+        } catch (Exception e) {
+            // 💡 2. 에러 발생 시 수동 파일 롤백 로직 추가!
+            try {
+                if (Files.exists(projectRoot)) {
+                    FileSystemUtils.deleteRecursively(projectRoot); // 프로젝트 폴더 전체 날리기
+                }
+            } catch (IOException ioException) {
+                System.err.println("프로젝트 폴더 롤백 실패: " + ioException.getMessage());
+            }
+            throw new RuntimeException("프로젝트 생성 중 DB/Git 오류 발생. 파일 롤백됨.", e);
+        }
     }
 
     @Transactional

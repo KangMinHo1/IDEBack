@@ -8,7 +8,8 @@ import lombok.NoArgsConstructor;
 
 @Entity
 @Table(name = "code_map_cache", uniqueConstraints = {
-        @UniqueConstraint(columnNames = {"workspaceId", "projectName", "branchName"})
+        // 💡 [수정] DB 물리 컬럼명인 스네이크 케이스로 변경 (서버 기동 에러 완벽 해결)
+        @UniqueConstraint(columnNames = {"workspace_id", "project_name", "branch_name"})
 })
 @Data
 @Builder

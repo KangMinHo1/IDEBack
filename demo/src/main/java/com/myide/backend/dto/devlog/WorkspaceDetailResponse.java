@@ -11,6 +11,5 @@ public class WorkspaceDetailResponse {
     private String uuid;
     private String name;
     private String mode;
-    private String teamName;
     private List<ProjectDevlogGroupResponse> projects;
 }

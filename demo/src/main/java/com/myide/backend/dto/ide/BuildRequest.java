@@ -1,4 +1,4 @@
-package com.myide.backend.dto;
+package com.myide.backend.dto.ide;
 
 import com.myide.backend.domain.LanguageType;
 import lombok.AllArgsConstructor;

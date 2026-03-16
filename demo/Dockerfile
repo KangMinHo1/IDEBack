@@ -17,6 +17,7 @@ ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
 ENV DOTNET_NOLOGO=1
 
 # 4. 기본 유틸리티, 필수 패키지 및 gdb 설치
+# 💡 핵심 수정: software-properties-common을 한 줄로 합쳤습니다!
 RUN apt-get update && apt-get install -y \
     locales \
     curl \
@@ -24,8 +25,7 @@ RUN apt-get update && apt-get install -y \
     git \
     zip \
     unzip \
-    software-properties \
-    -common \
+    software-properties-common \
     build-essential \
     gdb \
     && locale-gen en_US.UTF-8 \

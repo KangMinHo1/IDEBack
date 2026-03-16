@@ -1,4 +1,4 @@
-package com.myide.backend.dto;
+package com.myide.backend.dto.project;
 
 import com.myide.backend.domain.LanguageType;
 import lombok.AllArgsConstructor;
@@ -20,7 +20,6 @@ public class CreateProjectRequest {
     private String workspaceId;
 
     @NotBlank(message = "프로젝트 이름은 필수입니다.")
-    @Pattern(regexp = "^[a-zA-Z0-9-_]+$", message = "영문, 숫자, -, _ 만 사용 가능")
     private String projectName;
 
     @NotNull(message = "언어 선택은 필수입니다.")

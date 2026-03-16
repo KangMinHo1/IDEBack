@@ -1,4 +1,4 @@
-package com.myide.backend.repository;
+package com.myide.backend.repository.codemap;
 
 import com.myide.backend.domain.CodeMapCache;
 import org.springframework.data.jpa.repository.JpaRepository;

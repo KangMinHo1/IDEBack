@@ -8,15 +8,14 @@ import com.github.javaparser.ast.Modifier;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.FieldDeclaration;
 import com.github.javaparser.ast.body.TypeDeclaration;
-import com.github.javaparser.ast.type.ClassOrInterfaceType;
 import com.myide.backend.domain.CodeMapCache;
 import com.myide.backend.domain.CodeSummary;
 import com.myide.backend.dto.codemap.CreateComponentRequest;
 import com.myide.backend.dto.codemap.CreateRelationRequest;
 // 💡 [핵심] 회원님의 응답 DTO 임포트
 import com.myide.backend.dto.codemap.CodeMapResponse;
-import com.myide.backend.repository.CodeMapCacheRepository;
-import com.myide.backend.repository.CodeSummaryRepository;
+import com.myide.backend.repository.codemap.CodeMapCacheRepository;
+import com.myide.backend.repository.codemap.CodeSummaryRepository;
 import com.myide.backend.service.analyzer.JavaAnalyzer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

@@ -1,16 +1,14 @@
 package com.myide.backend.service;
 
-import com.myide.backend.domain.*;
-
 import com.myide.backend.domain.Devlog;
 import com.myide.backend.domain.Project;
-import com.myide.backend.domain.Workspace;
+import com.myide.backend.domain.workspace.Workspace;
+import com.myide.backend.domain.workspace.WorkspaceType;
 import com.myide.backend.dto.devlog.*;
 import com.myide.backend.exception.ApiException;
 import com.myide.backend.repository.DevlogRepository;
 import com.myide.backend.repository.ProjectRepository;
-import com.myide.backend.repository.WorkspaceRepository;
-import com.myide.backend.service.CurrentUserService;
+import com.myide.backend.repository.workspace.WorkspaceRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -34,9 +32,18 @@ public class DevlogService {
     private final DevlogRepository devlogRepository;
     private final CurrentUserService currentUserService;
 
+    // 💡 [도우미 메서드] CurrentUser의 ID를 Long으로 안전하게 변환
+    private Long getLongUserId() {
+        String userIdStr = currentUserService.getCurrentUserId();
+        try {
+            return Long.valueOf(userIdStr);
+        } catch (NumberFormatException e) {
+            throw new ApiException(HttpStatus.UNAUTHORIZED, "유효하지 않은 사용자 ID입니다.");
+        }
+    }
+
     /**
      * 내 워크스페이스 목록 조회
-     * - 현재 로그인한 사용자가 소유한 워크스페이스만 조회
      */
     public List<WorkspaceListItemResponse> getMyWorkspaces(String q, String sort) {
         Comparator<WorkspaceListItemResponse> comparator =
@@ -46,7 +53,10 @@ public class DevlogService {
             comparator = comparator.reversed();
         }
 
-        return workspaceRepository.findByOwnerId(currentUserService.getCurrentUserId()).stream()
+        Long userId = getLongUserId();
+
+        // 💡 [수정 1] findByOwnerId(String) -> findByOwner_Id(Long) 로 변경
+        return workspaceRepository.findByOwner_Id(userId).stream()
                 .map(workspace -> {
                     List<Project> projects =
                             projectRepository.findByWorkspaceUuidOrderByUpdatedAtDesc(workspace.getUuid());
@@ -60,7 +70,6 @@ public class DevlogService {
                             .uuid(workspace.getUuid())
                             .name(workspace.getName())
                             .mode(workspace.getType() == WorkspaceType.TEAM ? "team" : "personal")
-                            .teamName(workspace.getTeamName())
                             .lastUpdatedDate(lastUpdated.toString())
                             .projectCount(projects.size())
                             .build();
@@ -72,7 +81,6 @@ public class DevlogService {
 
     /**
      * 특정 워크스페이스 상세 조회
-     * - 현재 로그인한 사용자의 워크스페이스만 허용
      */
     public WorkspaceDetailResponse getWorkspaceDetail(String workspaceId, String q, String sort) {
         Workspace workspace = getOwnedWorkspace(workspaceId);
@@ -87,14 +95,12 @@ public class DevlogService {
                 .uuid(workspace.getUuid())
                 .name(workspace.getName())
                 .mode(workspace.getType() == WorkspaceType.TEAM ? "team" : "personal")
-                .teamName(workspace.getTeamName())
                 .projects(projectGroups)
                 .build();
     }
 
     /**
      * 개발일지 상세 조회
-     * - 내 워크스페이스 > 내 프로젝트 > 해당 개발일지 순으로 검증
      */
     public DevlogDetailResponse getDevlogDetail(String workspaceId, Long projectId, Long devlogId) {
         Project project = getOwnedProject(workspaceId, projectId);
@@ -226,12 +232,13 @@ public class DevlogService {
      * 현재 로그인한 사용자의 워크스페이스인지 검증
      */
     private Workspace getOwnedWorkspace(String workspaceId) {
-        String userId = currentUserService.getCurrentUserId();
+        Long userId = getLongUserId();
 
         Workspace workspace = workspaceRepository.findById(workspaceId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "워크스페이스를 찾을 수 없습니다."));
 
-        if (!userId.equals(workspace.getOwnerId())) {
+        // 💡 [수정 2] workspace.getOwnerId() -> workspace.getOwner().getId() 로 변경
+        if (!userId.equals(workspace.getOwner().getId())) {
             throw new ApiException(HttpStatus.FORBIDDEN, "본인 워크스페이스만 접근할 수 있습니다.");
         }
 
@@ -242,7 +249,7 @@ public class DevlogService {
      * 현재 로그인한 사용자의 워크스페이스에 속한 프로젝트인지 검증
      */
     private Project getOwnedProject(String workspaceId, Long projectId) {
-        getOwnedWorkspace(workspaceId);
+        getOwnedWorkspace(workspaceId); // 권한 체크
 
         return projectRepository.findByIdAndWorkspaceUuid(projectId, workspaceId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "프로젝트를 찾을 수 없습니다."));
@@ -255,8 +262,7 @@ public class DevlogService {
 
         String keyword = q.toLowerCase(Locale.ROOT);
 
-        return containsIgnoreCase(item.getName(), keyword)
-                || containsIgnoreCase(item.getTeamName(), keyword);
+        return containsIgnoreCase(item.getName(), keyword);
     }
 
     private boolean matchesDevlog(Devlog devlog, String q) {

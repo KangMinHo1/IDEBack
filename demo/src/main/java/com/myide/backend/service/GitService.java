@@ -18,7 +18,6 @@ import java.util.stream.Collectors;
 @Service
 public class GitService {
 
-    // 💡 시스템 내부 관리 파일 키워드 (Git 작업에서 제외됨)
     private static final String EXCLUDE_KEYWORD = "$$codemap$$";
 
     private String executeGitCommand(Path directory, String... commands) throws Exception {
@@ -36,8 +35,11 @@ public class GitService {
         }
         int exitCode = process.waitFor();
         if (exitCode != 0 && !commands[1].equals("status")) {
-            log.warn("Git 명령어 실패 [{}]: {}", Arrays.toString(commands), output.toString().trim());
-            throw new RuntimeException(output.toString().trim());
+            String safeCommandLog = Arrays.toString(commands).replaceAll("://.*@", "://***@");
+            String safeOutputLog = output.toString().trim().replaceAll("://.*@", "://***@");
+
+            log.warn("Git 명령어 실패 [{}]: {}", safeCommandLog, safeOutputLog);
+            throw new RuntimeException(safeOutputLog);
         }
         return output.toString();
     }
@@ -51,8 +53,6 @@ public class GitService {
                 config.setString("user", null, "email", "bot@webide.com");
                 config.save();
 
-                // 초기 커밋 시에도 시스템 파일 제외를 위해 명시적 처리 가능하지만,
-                // 생성 직후에는 보통 소스코드만 있으므로 패턴 유지
                 git.add().addFilepattern(".").call();
                 git.commit().setMessage("Initial commit: Project Created").setSign(false).call();
                 log.info("✅ Initial Commit Completed.");
@@ -85,7 +85,6 @@ public class GitService {
         }
     }
 
-    // 💡 [수정] getStatus에서 $$codemap$$ 파일을 필터링합니다!
     public Map<String, Object> getStatus(Path repoPath) {
         try {
             boolean isMerging = Files.exists(repoPath.resolve(".git").resolve("MERGE_HEAD"));
@@ -107,7 +106,6 @@ public class GitService {
 
                 if (path.startsWith("\"") && path.endsWith("\"")) path = path.substring(1, path.length() - 1);
 
-                // ✨ [핵심 필터링] 경로에 $$codemap$$이 포함되어 있으면 프론트에 보내지 않습니다.
                 if (path.contains(EXCLUDE_KEYWORD)) {
                     continue;
                 }
@@ -133,26 +131,21 @@ public class GitService {
         }
     }
 
-    // 💡 [수정] stage(add) 작업 시 $$codemap$$ 파일을 보호합니다!
     public void stage(Path repoPath, String filePattern) {
         try {
-            // 만약 "Stage All" 버튼으로 "." 패턴이 들어온 경우
             if (".".equals(filePattern)) {
                 log.info("🛡️ [Git] Stage All 요청 감지. 시스템 파일({}) 제외 처리를 시작합니다.", EXCLUDE_KEYWORD);
-                // 1. 전체를 add 하지 않고, status를 통해 파일 목록을 가져와서 필터링하여 개별 add 합니다.
                 String statusOutput = executeGitCommand(repoPath, "git", "status", "--porcelain");
                 for (String line : statusOutput.split("\n")) {
                     if (line.length() < 3) continue;
                     String path = line.substring(3).trim();
                     if (path.startsWith("\"") && path.endsWith("\"")) path = path.substring(1, path.length() - 1);
 
-                    // 시스템 관리 파일이 아닐 때만 add 실행
                     if (!path.contains(EXCLUDE_KEYWORD)) {
                         executeGitCommand(repoPath, "git", "add", path);
                     }
                 }
             } else {
-                // 특정 파일 하나만 넘긴 경우 (이미 getStatus에서 필터링되었으므로 안전하지만 한 번 더 체크)
                 if (filePattern.contains(EXCLUDE_KEYWORD)) {
                     log.warn("🛡️ [Git] 시스템 파일({})은 Stage 할 수 없습니다.", filePattern);
                     return;
@@ -228,12 +221,20 @@ public class GitService {
         }
     }
 
+    // 💡 [핵심 해결] 병합 충돌 시 예외를 던지지 않고 무시하여 500 에러를 방지합니다!
     public void merge(Path repoPath, String targetBranch) {
         try {
-            executeGitCommand(repoPath, "git", "merge", targetBranch);
-            log.info("🔀 Merged branch '{}' into current branch.", targetBranch);
+            String output = executeGitCommand(repoPath, "git", "merge", targetBranch);
+            log.info("🔀 Merged branch '{}' into current branch. Output: {}", targetBranch, output);
         } catch (Exception e) {
-            throw new RuntimeException("Merge 실패 (충돌 Conflict 발생): " + e.getMessage());
+            String errorMsg = e.getMessage();
+            // Git은 병합 충돌 시 에러 코드 1을 반환하므로 예외가 터집니다.
+            // 이를 "서버 에러(500)"가 아닌 "정상적인 충돌 상태"로 간주하고 삼킵니다!
+            if (errorMsg != null && (errorMsg.toLowerCase().contains("conflict") || errorMsg.contains("Automatic merge failed"))) {
+                log.warn("🔀 병합 중 충돌(Conflict) 발생! 프론트엔드가 제어하도록 200 OK를 반환합니다.");
+                return; // 💡 여기서 예외를 던지지 않고 조용히 리턴!
+            }
+            throw new RuntimeException("Merge 실패: " + errorMsg);
         }
     }
 

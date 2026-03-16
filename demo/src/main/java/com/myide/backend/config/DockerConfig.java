@@ -32,10 +32,4 @@ public class DockerConfig {
         return DockerClientImpl.getInstance(config, httpClient);
     }
 
-    // 2. JSON 변환기 빈 등록 (WebSocket 핸들러에서 사용)
-    // 이전에 발생했던 ObjectMapper 오류 방지용
-    @Bean
-    public ObjectMapper objectMapper() {
-        return new ObjectMapper();
-    }
 }
