@@ -21,14 +21,12 @@ public class GlobalExceptionHandler {
 
     /**
      * 1. 유효성 검사 실패 (@Valid 에러)
-     * DTO의 @NotBlank 조건 등을 만족하지 못했을 때 발생
      */
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<Map<String, String>> handleValidationExceptions(MethodArgumentNotValidException ex) {
         BindingResult bindingResult = ex.getBindingResult();
         Map<String, String> errors = new HashMap<>();
 
-        // 어떤 필드가 왜 틀렸는지 맵에 담음 (예: projectName -> "필수입니다")
         bindingResult.getFieldErrors().forEach(error ->
                 errors.put(error.getField(), error.getDefaultMessage())
         );
@@ -38,8 +36,18 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * 2. 보안 예외 처리 (해킹 의심 등)
-     * PathSecurityUtils에서 던진 SecurityException을 잡음
+     * 2. 데이터 중복 및 부적절한 인자 예외 처리 (뷰 이름 중복 등)
+     * RearrangeService에서 던지는 IllegalArgumentException을 잡습니다.
+     */
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<String> handleIllegalArgumentException(IllegalArgumentException ex) {
+        log.warn("부적절한 요청 발생: {}", ex.getMessage());
+        // 중복 상황이므로 409 Conflict를 반환하는 것이 시맨틱(Semantic)하게 적절합니다.
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ex.getMessage());
+    }
+
+    /**
+     * 3. 보안 예외 처리
      */
     @ExceptionHandler(SecurityException.class)
     public ResponseEntity<String> handleSecurityException(SecurityException ex) {
@@ -48,8 +56,7 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * 3. 비즈니스 로직 예외 (파일 중복, 디스크 오류 등)
-     * RuntimeException을 잡아서 처리
+     * 4. 비즈니스 로직 예외 (기타 런타임 에러)
      */
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<String> handleRuntimeException(RuntimeException ex) {
@@ -59,12 +66,11 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * 4. 기타 알 수 없는 예외
+     * 5. 기타 알 수 없는 예외
      */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<String> handleException(Exception ex) {
         log.error("알 수 없는 오류", ex);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("시스템 오류가 발생했습니다.");
     }
-
 }

@@ -1,19 +1,15 @@
+// 경로: src/main/java/com/myide/backend/service/AiAssistService.java
 package com.myide.backend.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.myide.backend.dto.aiassist.AiAssistRequest;
 import com.myide.backend.dto.aiassist.AiAssistResponse;
 import com.myide.backend.dto.codemap.CodeMapResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
-import org.springframework.web.client.RestTemplate;
 
-import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -22,13 +18,8 @@ import java.util.stream.Collectors;
 public class AiAssistService {
 
     private final CodeMapService codeMapService;
+    private final CoreAiService coreAiService; // 💡 공통 통신 모듈 주입!
     private final ObjectMapper objectMapper;
-
-    @Value("${google.gemini.api-key}")
-    private String apiKey;
-
-    @Value("${google.gemini.url}")
-    private String apiUrl;
 
     public AiAssistResponse getAiSuggestion(AiAssistRequest req) {
         try {
@@ -47,67 +38,41 @@ public class AiAssistService {
                     projectContext, req.getFilePath(), req.getCurrentCode(), req.getUserQuery()
             );
 
-            return callGemini(prompt, req.getCurrentCode());
-
-        } catch (Exception e) {
-            log.error("AI 어시스트 처리 중 알 수 없는 서버 오류", e);
-            return AiAssistResponse.builder()
-                    .success(false)
-                    .explanation("서버 내부 오류가 발생했습니다: " + e.getMessage())
-                    .suggestedCode(req.getCurrentCode())
-                    .build();
-        }
-    }
-
-    private AiAssistResponse callGemini(String prompt, String originalCode) {
-        RestTemplate restTemplate = new RestTemplate();
-        Map<String, Object> requestBody = Map.of(
-                "contents", List.of(Map.of("parts", List.of(Map.of("text", prompt))))
-        );
-
-        try {
-            String urlWithKey = apiUrl + "?key=" + apiKey;
-            String responseStr = restTemplate.postForObject(urlWithKey, requestBody, String.class);
-
-            JsonNode root = objectMapper.readTree(responseStr);
-            String aiJsonRaw = root.path("candidates").get(0).path("content").path("parts").get(0).path("text").asText();
-
-            aiJsonRaw = aiJsonRaw.replaceAll("```json", "").replaceAll("```", "").trim();
-            int startIndex = aiJsonRaw.indexOf("{");
-            int endIndex = aiJsonRaw.lastIndexOf("}");
-            if (startIndex != -1 && endIndex != -1) {
-                aiJsonRaw = aiJsonRaw.substring(startIndex, endIndex + 1);
-            }
-
-            AiAssistResponse response = objectMapper.readValue(aiJsonRaw, AiAssistResponse.class);
-            response.setSuccess(true);
-            return response;
+            // 💡 CoreAiService 호출
+            String rawResponse = coreAiService.generateText(prompt);
+            return parseSuggestionResponse(rawResponse, req.getCurrentCode());
 
         } catch (HttpClientErrorException e) {
             log.error("Google API 통신 오류! : {}", e.getResponseBodyAsString());
-
-            // 💡 429 에러(너무 잦은 요청) 방어 로직 포함
             if (e.getStatusCode().value() == 429) {
-                return AiAssistResponse.builder()
-                        .success(false)
-                        .explanation("요청이 너무 빠르거나 할당량이 초과되었습니다. 잠시 후 다시 시도해 주세요! 😅")
-                        .suggestedCode(originalCode)
-                        .build();
+                return buildErrorResponse("요청이 너무 빠르거나 할당량이 초과되었습니다. 잠시 후 다시 시도해 주세요! 😅", req.getCurrentCode());
             }
+            return buildErrorResponse("AI 모델 호출 실패 (설정을 확인하세요): " + e.getStatusCode(), req.getCurrentCode());
+        } catch (Exception e) {
+            log.error("AI 어시스트 처리 중 알 수 없는 서버 오류", e);
+            return buildErrorResponse("서버 내부 오류가 발생했습니다: " + e.getMessage(), req.getCurrentCode());
+        }
+    }
 
-            return AiAssistResponse.builder()
-                    .success(false)
-                    .explanation("AI 모델 호출 실패 (설정을 확인하세요): " + e.getStatusCode())
-                    .suggestedCode(originalCode)
-                    .build();
+    private AiAssistResponse parseSuggestionResponse(String rawResponse, String originalCode) {
+        try {
+            String cleanJson = rawResponse.replaceAll("```json", "").replaceAll("```", "").trim();
+            int startIndex = cleanJson.indexOf("{");
+            int endIndex = cleanJson.lastIndexOf("}");
+            if (startIndex != -1 && endIndex != -1) {
+                cleanJson = cleanJson.substring(startIndex, endIndex + 1);
+            }
+            AiAssistResponse response = objectMapper.readValue(cleanJson, AiAssistResponse.class);
+            response.setSuccess(true);
+            return response;
         } catch (Exception e) {
             log.error("Gemini 응답 파싱 실패", e);
-            return AiAssistResponse.builder()
-                    .success(false)
-                    .explanation("AI가 올바른 형식으로 응답하지 않았습니다. 다시 시도해주세요.")
-                    .suggestedCode(originalCode)
-                    .build();
+            return buildErrorResponse("AI가 올바른 형식으로 응답하지 않았습니다. 다시 시도해주세요.", originalCode);
         }
+    }
+
+    private AiAssistResponse buildErrorResponse(String message, String originalCode) {
+        return AiAssistResponse.builder().success(false).explanation(message).suggestedCode(originalCode).build();
     }
 
     private String formatContext(CodeMapResponse map) {
@@ -117,9 +82,6 @@ public class AiAssistService {
                 .collect(Collectors.joining("\n"));
     }
 
-    // ====================================================================
-    // 💡 고스트 텍스트(자동완성) 전용 메서드
-    // ====================================================================
     public String getAutocompleteSuggestion(String prefix, String suffix) {
         String prompt = String.format(
                 "You are an AI code completion engine. Return ONLY the exact code that should be inserted at the cursor position. " +
@@ -128,31 +90,15 @@ public class AiAssistService {
                         "// Code AFTER cursor:\n%s", prefix, suffix
         );
 
-        RestTemplate restTemplate = new RestTemplate();
-        Map<String, Object> requestBody = Map.of(
-                "contents", List.of(Map.of("parts", List.of(Map.of("text", prompt))))
-        );
-
         try {
-            String urlWithKey = apiUrl + "?key=" + apiKey;
-            String responseStr = restTemplate.postForObject(urlWithKey, requestBody, String.class);
-            JsonNode root = objectMapper.readTree(responseStr);
-            String aiRaw = root.path("candidates").get(0).path("content").path("parts").get(0).path("text").asText();
-
-            aiRaw = aiRaw.replaceAll("```[a-zA-Z]*\n", "").replaceAll("```", "").trim();
-            return aiRaw;
-
-            // 🚨 [수정됨] 통신 에러 시 구글의 거절 사유를 상세하게 출력!
+            // 💡 CoreAiService 호출
+            String aiRaw = coreAiService.generateText(prompt);
+            return aiRaw.replaceAll("```[a-zA-Z]*\n", "").replaceAll("```", "").trim();
         } catch (HttpClientErrorException e) {
-            log.error("💀 [고스트 텍스트 에러] 구글 API가 대답을 거절했습니다!");
-            log.error("👉 거절 이유(상태코드): {}", e.getStatusCode());
-            log.error("👉 상세 내용: {}", e.getResponseBodyAsString());
+            log.error("💀 [고스트 텍스트 에러] 구글 API가 대답을 거절했습니다! 상태코드: {}", e.getStatusCode());
             return "";
-
-            // 🚨 [수정됨] 파싱 에러 시 상세 원인 출력!
         } catch (Exception e) {
-            log.error("💀 [고스트 텍스트 에러] 구글 응답은 왔는데 파싱하다 터졌습니다!");
-            log.error("👉 에러 메시지: {}", e.getMessage(), e);
+            log.error("💀 [고스트 텍스트 에러] 구글 응답 파싱 에러", e);
             return "";
         }
     }
