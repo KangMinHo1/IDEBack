@@ -8,7 +8,9 @@ import java.util.Optional;
 
 public interface DevlogRepository extends JpaRepository<Devlog, Long> {
 
-    List<Devlog> findByProjectId(Long projectId);
+    long countByProject_Id(Long projectId);
 
-    Optional<Devlog> findByIdAndProjectId(Long id, Long projectId);
+    List<Devlog> findByProject_Id(Long projectId);
+
+    Optional<Devlog> findByIdAndProject_Id(Long id, Long projectId);
 }

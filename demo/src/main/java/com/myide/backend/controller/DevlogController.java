@@ -1,9 +1,14 @@
 package com.myide.backend.controller;
 
-import com.myide.backend.dto.devlog.*;
+import com.myide.backend.dto.devlog.DevlogCreateRequest;
+import com.myide.backend.dto.devlog.DevlogDetailResponse;
+import com.myide.backend.dto.devlog.DevlogUpdateRequest;
+import com.myide.backend.dto.devlog.WorkspaceDetailResponse;
+import com.myide.backend.dto.devlog.WorkspaceListItemResponse;
 import com.myide.backend.service.DevlogService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -46,26 +51,29 @@ public class DevlogController {
 
     // 새 일지 작성
     @PostMapping
-    public DevlogDetailResponse create(@Valid @RequestBody DevlogCreateRequest request) {
-        return devlogService.create(request);
+    public ResponseEntity<Void> create(@Valid @RequestBody DevlogCreateRequest request) {
+        devlogService.createDevlog(request);
+        return ResponseEntity.ok().build();
     }
 
     // 수정
     @PutMapping("/{devlogId}")
-    public DevlogDetailResponse update(
+    public ResponseEntity<Void> update(
             @PathVariable Long devlogId,
             @Valid @RequestBody DevlogUpdateRequest request
     ) {
-        return devlogService.update(devlogId, request);
+        devlogService.updateDevlog(devlogId, request);
+        return ResponseEntity.ok().build();
     }
 
     // 삭제
     @DeleteMapping("/{devlogId}")
-    public void delete(
+    public ResponseEntity<Void> delete(
             @PathVariable Long devlogId,
             @RequestParam String workspaceId,
             @RequestParam Long projectId
     ) {
         devlogService.delete(workspaceId, projectId, devlogId);
+        return ResponseEntity.ok().build();
     }
 }

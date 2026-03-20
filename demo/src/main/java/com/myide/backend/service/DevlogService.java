@@ -2,6 +2,7 @@ package com.myide.backend.service;
 
 import com.myide.backend.domain.Devlog;
 import com.myide.backend.domain.Project;
+
 import com.myide.backend.domain.workspace.Workspace;
 import com.myide.backend.domain.workspace.WorkspaceType;
 import com.myide.backend.dto.devlog.*;
@@ -65,13 +66,16 @@ public class DevlogService {
                             .map(project -> project.getUpdatedAt().toLocalDate())
                             .max(LocalDate::compareTo)
                             .orElse(workspace.getUpdatedAt().toLocalDate());
+                    int devlogCount = projects.stream()
+                            .mapToInt(project -> (int) devlogRepository.countByProject_Id(project.getId()))
+                            .sum();
 
                     return WorkspaceListItemResponse.builder()
                             .uuid(workspace.getUuid())
                             .name(workspace.getName())
                             .mode(workspace.getType() == WorkspaceType.TEAM ? "team" : "personal")
                             .lastUpdatedDate(lastUpdated.toString())
-                            .projectCount(projects.size())
+                            .devlogCount(devlogCount)
                             .build();
                 })
                 .filter(item -> matchesWorkspace(item, q))
@@ -86,7 +90,7 @@ public class DevlogService {
         Workspace workspace = getOwnedWorkspace(workspaceId);
 
         List<ProjectDevlogGroupResponse> projectGroups = projectRepository
-                .findByWorkspaceUuidOrderByUpdatedAtDesc(workspaceId)
+                .findByWorkspaceUuidOrderByUpdatedAtDesc(workspace.getUuid())
                 .stream()
                 .map(project -> toProjectGroup(project, q, sort))
                 .toList();
@@ -103,9 +107,10 @@ public class DevlogService {
      * 개발일지 상세 조회
      */
     public DevlogDetailResponse getDevlogDetail(String workspaceId, Long projectId, Long devlogId) {
+        getOwnedWorkspace(workspaceId);
         Project project = getOwnedProject(workspaceId, projectId);
 
-        Devlog devlog = devlogRepository.findByIdAndProjectId(devlogId, project.getId())
+        Devlog devlog = devlogRepository.findByIdAndProject_Id(devlogId, project.getId())
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "개발일지를 찾을 수 없습니다."));
 
         return toDevlogDetail(workspaceId, projectId, devlog);
@@ -115,7 +120,7 @@ public class DevlogService {
      * 개발일지 생성
      */
     @Transactional
-    public DevlogDetailResponse create(DevlogCreateRequest request) {
+    public void createDevlog(DevlogCreateRequest request) {
         Workspace workspace = getOwnedWorkspace(request.getWorkspaceId());
         Project project = getOwnedProject(request.getWorkspaceId(), request.getProjectId());
 
@@ -127,27 +132,35 @@ public class DevlogService {
                 .summary(safeTrim(request.getSummary()))
                 .content(safeTrim(request.getContent()))
                 .tags(normalizeTags(request.getTagsText()))
+                .date(request.getDate() != null ? request.getDate() : LocalDate.now())
+                .stage(normalizeStage(request.getStage()))
+                .goal(safeTrim(request.getGoal()))
+                .design(request.getDesign())
+                .issue(safeTrim(request.getIssue()))
+                .solution(safeTrim(request.getSolution()))
+
+                .nextPlan(safeTrim(request.getNextPlan()))
+                .commitHash(safeTrim(request.getCommitHash()))
+                .progress(normalizeProgress(request.getProgress()))
                 .createdAt(now)
                 .updatedAt(now)
                 .build();
 
-        Devlog saved = devlogRepository.save(devlog);
+        devlogRepository.save(devlog);
 
         project.setUpdatedAt(now);
         workspace.setUpdatedAt(now);
-
-        return toDevlogDetail(request.getWorkspaceId(), request.getProjectId(), saved);
     }
 
     /**
      * 개발일지 수정
      */
     @Transactional
-    public DevlogDetailResponse update(Long devlogId, DevlogUpdateRequest request) {
+    public void updateDevlog(Long devlogId, DevlogUpdateRequest request) {
         Workspace workspace = getOwnedWorkspace(request.getWorkspaceId());
         Project project = getOwnedProject(request.getWorkspaceId(), request.getProjectId());
 
-        Devlog devlog = devlogRepository.findByIdAndProjectId(devlogId, project.getId())
+        Devlog devlog = devlogRepository.findByIdAndProject_Id(devlogId, project.getId())
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "개발일지를 찾을 수 없습니다."));
 
         LocalDateTime now = LocalDateTime.now();
@@ -156,12 +169,20 @@ public class DevlogService {
         devlog.setSummary(safeTrim(request.getSummary()));
         devlog.setContent(safeTrim(request.getContent()));
         devlog.setTags(normalizeTags(request.getTagsText()));
+        devlog.setDate(request.getDate() != null ? request.getDate() : devlog.getDate());
+        devlog.setStage(normalizeStage(request.getStage()));
+        devlog.setGoal(safeTrim(request.getGoal()));
+        devlog.setDesign(request.getDesign());
+        devlog.setIssue(safeTrim(request.getIssue()));
+        devlog.setSolution(safeTrim(request.getSolution()));
+        devlog.setNextPlan(safeTrim(request.getNextPlan()));
+        devlog.setCommitHash(safeTrim(request.getCommitHash()));
+        devlog.setProgress(normalizeProgress(request.getProgress()));
         devlog.setUpdatedAt(now);
+
 
         project.setUpdatedAt(now);
         workspace.setUpdatedAt(now);
-
-        return toDevlogDetail(request.getWorkspaceId(), request.getProjectId(), devlog);
     }
 
     /**
@@ -172,7 +193,7 @@ public class DevlogService {
         Workspace workspace = getOwnedWorkspace(workspaceId);
         Project project = getOwnedProject(workspaceId, projectId);
 
-        Devlog devlog = devlogRepository.findByIdAndProjectId(devlogId, project.getId())
+        Devlog devlog = devlogRepository.findByIdAndProject_Id(devlogId, project.getId())
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "개발일지를 찾을 수 없습니다."));
 
         devlogRepository.delete(devlog);
@@ -188,7 +209,7 @@ public class DevlogService {
             comparator = comparator.reversed();
         }
 
-        List<DevlogItemResponse> posts = devlogRepository.findByProjectId(project.getId()).stream()
+        List<DevlogItemResponse> posts = devlogRepository.findByProject_Id(project.getId()).stream()
                 .filter(devlog -> matchesDevlog(devlog, q))
                 .sorted(comparator)
                 .map(this::toDevlogItem)
@@ -199,7 +220,11 @@ public class DevlogService {
                 .name(project.getName())
                 .description(project.getDescription())
                 .language(project.getLanguage().name())
-                .lastUpdatedDate(project.getUpdatedAt() != null ? project.getUpdatedAt().toLocalDate().toString() : null)
+                .lastUpdatedDate(
+                        project.getUpdatedAt() != null
+                                ? project.getUpdatedAt().toLocalDate().toString()
+                                : null
+                )
                 .devlogCount(posts.size())
                 .posts(posts)
                 .build();
@@ -207,11 +232,25 @@ public class DevlogService {
 
     private DevlogItemResponse toDevlogItem(Devlog devlog) {
         return DevlogItemResponse.builder()
-                .id(devlog.getId())
+                .id(String.valueOf(devlog.getId()))
                 .title(devlog.getTitle())
-                .date(devlog.getCreatedAt() != null ? devlog.getCreatedAt().toLocalDate().toString() : null)
+                .date(devlog.getDate() != null
+                        ? devlog.getDate().toString()
+                        : (devlog.getCreatedAt() != null
+                        ? devlog.getCreatedAt().toLocalDate().toString()
+                        : null))
                 .summary(devlog.getSummary())
+                .content(devlog.getContent())
                 .tags(splitTags(devlog.getTags()))
+                .stage(devlog.getStage())
+                .goal(devlog.getGoal())
+                .design(devlog.getDesign())
+                .issue(devlog.getIssue())
+                .solution(devlog.getSolution())
+
+                .nextPlan(devlog.getNextPlan())
+                .commitHash(devlog.getCommitHash())
+                .progress(devlog.getProgress())
                 .build();
     }
 
@@ -221,10 +260,23 @@ public class DevlogService {
                 .workspaceId(workspaceId)
                 .projectId(projectId)
                 .title(devlog.getTitle())
-                .date(devlog.getCreatedAt() != null ? devlog.getCreatedAt().toLocalDate().toString() : null)
+                .date(devlog.getDate() != null
+                        ? devlog.getDate().toString()
+                        : (devlog.getCreatedAt() != null
+                        ? devlog.getCreatedAt().toLocalDate().toString()
+                        : null))
                 .summary(devlog.getSummary())
                 .content(devlog.getContent())
                 .tags(splitTags(devlog.getTags()))
+                .stage(devlog.getStage())
+                .goal(devlog.getGoal())
+                .design(devlog.getDesign())
+                .issue(devlog.getIssue())
+                .solution(devlog.getSolution())
+
+                .nextPlan(devlog.getNextPlan())
+                .commitHash(devlog.getCommitHash())
+                .progress(devlog.getProgress())
                 .build();
     }
 
@@ -275,7 +327,15 @@ public class DevlogService {
         return containsIgnoreCase(devlog.getTitle(), keyword)
                 || containsIgnoreCase(devlog.getSummary(), keyword)
                 || containsIgnoreCase(devlog.getContent(), keyword)
-                || containsIgnoreCase(devlog.getTags(), keyword);
+                || containsIgnoreCase(devlog.getTags(), keyword)
+                || containsIgnoreCase(devlog.getStage(), keyword)
+                || containsIgnoreCase(devlog.getGoal(), keyword)
+                || containsIgnoreCase(devlog.getDesign(), keyword)
+                || containsIgnoreCase(devlog.getIssue(), keyword)
+                || containsIgnoreCase(devlog.getSolution(), keyword)
+
+                || containsIgnoreCase(devlog.getNextPlan(), keyword)
+                || containsIgnoreCase(devlog.getCommitHash(), keyword);
     }
 
     private boolean containsIgnoreCase(String source, String keyword) {
@@ -311,5 +371,36 @@ public class DevlogService {
 
     private String safeTrim(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    private String normalizeStage(String stage) {
+        if (stage == null || stage.isBlank()) {
+            return "implementation";
+        }
+
+        switch (stage) {
+            case "planning":
+            case "implementation":
+            case "wrapup":
+                return stage;
+            default:
+                throw new ApiException(HttpStatus.BAD_REQUEST, "유효하지 않은 stage 값입니다.");
+        }
+    }
+
+    private Integer normalizeProgress(Integer progress) {
+        if (progress == null) {
+            return 0;
+        }
+
+        if (progress < 0) {
+            return 0;
+        }
+
+        if (progress > 100) {
+            return 100;
+        }
+
+        return progress;
     }
 }

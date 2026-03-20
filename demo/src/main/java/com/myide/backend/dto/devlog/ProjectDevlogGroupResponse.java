@@ -13,6 +13,6 @@ public class ProjectDevlogGroupResponse {
     private String description;
     private String language;
     private String lastUpdatedDate;
-    private int devlogCount;
+    private Integer devlogCount;
     private List<DevlogItemResponse> posts;
 }

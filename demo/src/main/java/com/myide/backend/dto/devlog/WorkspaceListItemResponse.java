@@ -12,5 +12,5 @@ public class WorkspaceListItemResponse {
     private String name;
     private String mode; // personal / team
     private String lastUpdatedDate;
-    private int projectCount;
+    private int devlogCount;
 }

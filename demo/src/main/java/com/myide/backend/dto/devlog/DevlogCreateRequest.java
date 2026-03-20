@@ -2,8 +2,11 @@ package com.myide.backend.dto.devlog;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import com.fasterxml.jackson.annotation.JsonFormat;
 import lombok.Getter;
 import lombok.Setter;
+
+import java.time.LocalDate;
 
 @Getter
 @Setter
@@ -25,4 +28,27 @@ public class DevlogCreateRequest {
     private String content;
 
     private String tagsText;
+
+    /**
+     * 캘린더 날짜
+     */
+    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd")
+    private LocalDate date;
+
+    /**
+     * 새 필드
+     */
+//    private List<String> tags;
+    private String stage;
+    private String goal;
+    private String design;
+    private String issue;
+    private String solution;
+    private String nextPlan;
+    private String commitHash;
+    private Integer progress;
+
+
+
+
 }
