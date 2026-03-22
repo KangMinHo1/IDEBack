@@ -8,7 +8,7 @@ import java.util.List;
 @Getter
 @Builder
 public class DevlogItemResponse {
-    private String id;
+    private Long id;
     private String title;
     private String date;
     private String summary;
@@ -23,7 +23,4 @@ public class DevlogItemResponse {
     private String nextPlan;
     private String commitHash;
     private Integer progress;
-
-
-
 }

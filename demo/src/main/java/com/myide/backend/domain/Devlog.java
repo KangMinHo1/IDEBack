@@ -22,7 +22,6 @@ public class Devlog {
     @JoinColumn(name = "project_id")
     private Project project;
 
-
     @Column(nullable = false, length = 200)
     private String title;
 
@@ -36,9 +35,6 @@ public class Devlog {
     @Column(length = 500)
     private String tags;
 
-
-
-
     /**
      * 작성 날짜(캘린더 표시용)
      */
@@ -47,18 +43,18 @@ public class Devlog {
     private LocalDate date = LocalDate.now();
 
     /**
-     * 새로 추가되는 필드들
+     * 단계
+     * planning / design / implementation / wrapup
      */
     @Column(nullable = false, length = 30)
     @Builder.Default
-    private String stage = "implementation"; // planning / implementation / wrapup
+    private String stage = "implementation";
 
     @Column(columnDefinition = "TEXT")
     private String goal;
 
     @Column(columnDefinition = "TEXT")
     private String design;
-
 
     @Column(columnDefinition = "TEXT")
     private String issue;

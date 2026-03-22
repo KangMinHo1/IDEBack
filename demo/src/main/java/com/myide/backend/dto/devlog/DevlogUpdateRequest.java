@@ -27,15 +27,8 @@ public class DevlogUpdateRequest {
     private String content;
 
     private String tagsText;
-
-    /**
-     * 캘린더 날짜
-     */
     private LocalDate date;
 
-    /**
-     * 새 필드
-     */
     private String stage;
     private String goal;
     private String design;
@@ -44,6 +37,4 @@ public class DevlogUpdateRequest {
     private String nextPlan;
     private String commitHash;
     private Integer progress;
-
-
 }

@@ -3,7 +3,6 @@ package com.myide.backend.dto.devlog;
 import lombok.Builder;
 import lombok.Getter;
 
-
 import java.util.List;
 
 @Getter
@@ -18,9 +17,6 @@ public class DevlogDetailResponse {
     private String content;
     private List<String> tags;
 
-    /**
-     * 새 필드
-     */
     private String stage;
     private String goal;
     private String design;
@@ -29,7 +25,4 @@ public class DevlogDetailResponse {
     private String nextPlan;
     private String commitHash;
     private Integer progress;
-
-
-
 }
