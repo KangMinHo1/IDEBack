@@ -106,4 +106,13 @@ public class RearrangeService {
                 .map(RearrangeResponse::from)
                 .orElse(null);
     }
+
+    // 💡 [NEW] 워크스페이스에 저장된 모든 가상 트리 목록 가져오기 (최신순)
+    @Transactional(readOnly = true)
+    public List<RearrangeResponse> getAllTrees(String workspaceId) {
+        return rearrangeRepository.findByWorkspaceIdOrderByCreatedAtDesc(workspaceId)
+                .stream()
+                .map(RearrangeResponse::from)
+                .collect(Collectors.toList());
+    }
 }

@@ -8,6 +8,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/api/workspaces/{workspaceId}/rearrange")
 @RequiredArgsConstructor
@@ -44,5 +46,11 @@ public class RearrangeController {
     public ResponseEntity<RearrangeResponse> getActiveTree(@PathVariable String workspaceId) {
         RearrangeResponse activeTree = rearrangeService.getActiveTree(workspaceId);
         return activeTree != null ? ResponseEntity.ok(activeTree) : ResponseEntity.noContent().build();
+    }
+
+    // 💡 [NEW] 저장된 모든 가상 트리 목록 조회 (사이드바 드롭다운용)
+    @GetMapping
+    public ResponseEntity<List<RearrangeResponse>> getAllTrees(@PathVariable String workspaceId) {
+        return ResponseEntity.ok(rearrangeService.getAllTrees(workspaceId));
     }
 }
