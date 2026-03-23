@@ -13,6 +13,7 @@ public class RearrangeResponse {
     private String criteria;
     private String treeDataJson;
     private boolean isActive;
+    private String branchName; // 💡 [NEW]
 
     public static RearrangeResponse from(VirtualFileTree tree) {
         return RearrangeResponse.builder()
@@ -21,6 +22,7 @@ public class RearrangeResponse {
                 .criteria(tree.getCriteria())
                 .treeDataJson(tree.getTreeDataJson())
                 .isActive(tree.isActive())
+                .branchName(tree.getBranchName()) // 💡 [NEW]
                 .build();
     }
 }

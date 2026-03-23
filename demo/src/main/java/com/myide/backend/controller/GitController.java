@@ -117,4 +117,25 @@ public class GitController {
         gitService.checkoutCommit(repoPath, body.get("targetHash"));
         return ResponseEntity.ok("Checkout successfully");
     }
+    
+    //  브랜치 삭제 API
+    // =========================================================================
+    @DeleteMapping("/{workspaceId}/{projectName}/branches/{branchName}")
+    public ResponseEntity<String> deleteBranch(
+            @PathVariable String workspaceId,
+            @PathVariable String projectName,
+            @PathVariable String branchName) {
+
+        // 마스터 브랜치는 절대 삭제 불가! (방어 로직)
+        if ("master".equalsIgnoreCase(branchName)) {
+            return ResponseEntity.badRequest().body("master 브랜치는 삭제할 수 없습니다.");
+        }
+
+        // 삭제 명령은 항상 기준점인 'master' 폴더에서 실행해야 안전함
+        Path masterRepoPath = workspaceService.getProjectPath(workspaceId, projectName, "master");
+        Path worktreePath = workspaceService.getProjectPath(workspaceId, projectName, branchName);
+
+        gitService.deleteBranch(masterRepoPath, worktreePath, branchName);
+        return ResponseEntity.ok("브랜치가 안전하게 삭제되었습니다.");
+    }
 }

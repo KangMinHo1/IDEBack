@@ -12,15 +12,17 @@ import java.util.Optional;
 
 public interface VirtualFileTreeRepository extends JpaRepository<VirtualFileTree, Long> {
 
-    // 👇 중복 검사를 위한 메서드 추가!
-    boolean existsByWorkspaceIdAndViewName(String workspaceId, String viewName);
+    // 💡 [수정] 브랜치까지 묶어서 중복 검사
+    boolean existsByWorkspaceIdAndBranchNameAndViewName(String workspaceId, String branchName, String viewName);
 
-    List<VirtualFileTree> findByWorkspaceIdOrderByCreatedAtDesc(String workspaceId);
+    // 💡 [수정] 현재 보고 있는 브랜치에 저장된 뷰 목록만 가져오기
+    List<VirtualFileTree> findByWorkspaceIdAndBranchNameOrderByCreatedAtDesc(String workspaceId, String branchName);
 
-    Optional<VirtualFileTree> findByWorkspaceIdAndIsActiveTrue(String workspaceId);
+    // 💡 [수정] 현재 보고 있는 브랜치에서 Active 상태인 뷰 가져오기
+    Optional<VirtualFileTree> findByWorkspaceIdAndBranchNameAndIsActiveTrue(String workspaceId, String branchName);
 
-    // 특정 워크스페이스의 모든 뷰를 비활성화 (새로운 뷰를 Active 하기 전 호출)
+    // 💡 [수정] '특정 브랜치'의 모든 뷰만 콕 집어서 비활성화
     @Modifying
-    @Query("UPDATE VirtualFileTree v SET v.isActive = false WHERE v.workspaceId = :workspaceId")
-    void deactivateAllByWorkspaceId(@Param("workspaceId") String workspaceId);
+    @Query("UPDATE VirtualFileTree v SET v.isActive = false WHERE v.workspaceId = :workspaceId AND v.branchName = :branchName")
+    void deactivateAllByWorkspaceIdAndBranchName(@Param("workspaceId") String workspaceId, @Param("branchName") String branchName);
 }
