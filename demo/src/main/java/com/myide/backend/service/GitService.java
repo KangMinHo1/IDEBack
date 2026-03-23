@@ -300,4 +300,27 @@ public class GitService {
             throw new RuntimeException("히스토리 조회 실패: " + e.getMessage());
         }
     }
+
+    // =========================================================================
+    // 💡 [NEW] 브랜치 및 워크트리 폴더 완벽 삭제 로직
+    // =========================================================================
+    public void deleteBranch(Path masterRepoPath, Path worktreePath, String branchName) {
+        try {
+            if ("master".equalsIgnoreCase(branchName)) {
+                throw new IllegalArgumentException("master 브랜치는 삭제할 수 없습니다.");
+            }
+
+            // 1. 해당 브랜치의 워크트리 폴더를 Git 명령어로 강제 철거 (-f)
+            executeGitCommand(masterRepoPath, "git", "worktree", "remove", "-f", worktreePath.toAbsolutePath().toString());
+            log.info("🗑️ Worktree Folder Deleted: {}", worktreePath);
+
+            // 2. 워크트리가 지워졌으니, 이제 Git 시스템에서 브랜치 기록도 강제 삭제 (-D)
+            executeGitCommand(masterRepoPath, "git", "branch", "-D", branchName);
+            log.info("🗑️ Git Branch Deleted: {}", branchName);
+
+        } catch (Exception e) {
+            log.error("Branch Delete Failed", e);
+            throw new RuntimeException("브랜치 삭제 실패: " + e.getMessage());
+        }
+    }
 }

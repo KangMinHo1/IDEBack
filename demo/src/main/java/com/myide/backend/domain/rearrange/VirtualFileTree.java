@@ -13,8 +13,9 @@ import java.time.LocalDateTime;
 @Builder
 @Table(name = "virtual_file_tree", uniqueConstraints = {
         @UniqueConstraint(
-                name = "uk_workspace_view_name",
-                columnNames = {"workspaceId", "viewName"}
+                name = "uk_workspace_branch_view_name",
+                // 💡 [NEW] 같은 워크스페이스라도 '브랜치'가 다르면 같은 이름 허용!
+                columnNames = {"workspaceId", "branchName", "viewName"}
         )
 })
 public class VirtualFileTree {
@@ -26,21 +27,23 @@ public class VirtualFileTree {
     @Column(nullable = false)
     private String workspaceId;
 
+    // 💡 [NEW] 이 가상 뷰가 어느 브랜치에 종속된 것인지 기록합니다.
     @Column(nullable = false)
-    private String viewName; // 예: "풀스택 아키텍처별", "내 프롬프트 맞춤형"
+    private String branchName;
 
     @Column(nullable = false)
-    private String criteria; // AI에게 보냈던 프롬프트 원문
+    private String viewName;
+
+    @Column(nullable = false)
+    private String criteria;
 
     @Column(columnDefinition = "LONGTEXT", nullable = false)
-    private String treeDataJson; // AI가 만들어준 가상 폴더 트리 (JSON)
+    private String treeDataJson;
 
     @Column(nullable = false)
-    private boolean isActive; // 현재 워크스페이스에 적용 중인지 여부
+    private boolean isActive;
 
     @Column(nullable = false, updatable = false)
     @Builder.Default
     private LocalDateTime createdAt = LocalDateTime.now();
-
-
 }
