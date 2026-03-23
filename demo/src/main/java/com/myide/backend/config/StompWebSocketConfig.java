@@ -11,6 +11,7 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
 @EnableWebSocketMessageBroker
 public class StompWebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
+    // 채팅 StompConfig
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         // 프론트엔드에서 웹소켓 연결을 맺을 엔드포인트
