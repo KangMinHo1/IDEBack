@@ -1,6 +1,7 @@
 package com.myide.backend.controller;
 
 import com.myide.backend.dto.schedule.ScheduleCreateRequest;
+import com.myide.backend.dto.schedule.ScheduleProgressResponse;
 import com.myide.backend.dto.schedule.ScheduleResponse;
 import com.myide.backend.dto.schedule.ScheduleSummaryResponse;
 import com.myide.backend.dto.schedule.ScheduleTeamMemberResponse;
@@ -106,6 +107,18 @@ public class ScheduleController {
             @RequestParam(required = false) String workspaceId
     ) {
         return scheduleService.getSummary(view, date, workspaceId);
+    }
+
+    /**
+     * 진행률 조회
+     * view = personal | team
+     */
+    @GetMapping("/progress")
+    public ScheduleProgressResponse getProgress(
+            @RequestParam String view,
+            @RequestParam String workspaceId
+    ) {
+        return scheduleService.getProgress(view, workspaceId);
     }
 
     /**

@@ -6,6 +6,7 @@ import com.myide.backend.domain.workspace.Workspace;
 import com.myide.backend.domain.workspace.WorkspaceMember;
 import com.myide.backend.domain.workspace.WorkspaceType;
 import com.myide.backend.dto.schedule.ScheduleCreateRequest;
+import com.myide.backend.dto.schedule.ScheduleProgressResponse;
 import com.myide.backend.dto.schedule.ScheduleResponse;
 import com.myide.backend.dto.schedule.ScheduleSummaryResponse;
 import com.myide.backend.dto.schedule.ScheduleTeamMemberResponse;
@@ -135,6 +136,60 @@ public class ScheduleService {
         validateScheduleEditable(schedule, currentUserId);
 
         scheduleRepository.delete(schedule);
+    }
+
+    /**
+     * 진행률 조회
+     * 현재 구조에서는 Schedule이 project와 연결되어 있지 않으므로 workspace 기준으로 계산
+     */
+    public ScheduleProgressResponse getProgress(String view, String workspaceId) {
+        Long currentUserId = currentUserService.getCurrentUserId();
+
+        if (!"personal".equalsIgnoreCase(view) && !"team".equalsIgnoreCase(view)) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "진행률 조회는 personal 또는 team view만 지원합니다.");
+        }
+
+        Workspace workspace = getWorkspaceOrThrow(workspaceId);
+
+        Schedule.ScheduleType targetType;
+        if ("personal".equalsIgnoreCase(view)) {
+            validateWorkspaceMatchesScheduleType(workspace, Schedule.ScheduleType.PERSONAL);
+            validatePersonalWorkspaceAccessible(workspace, currentUserId);
+            targetType = Schedule.ScheduleType.PERSONAL;
+        } else {
+            validateWorkspaceMatchesScheduleType(workspace, Schedule.ScheduleType.TEAM);
+            validateTeamAccessible(workspace, currentUserId);
+            targetType = Schedule.ScheduleType.TEAM;
+        }
+
+        long totalCount = scheduleRepository.countByTypeAndWorkspace_Uuid(
+                targetType,
+                workspaceId
+        );
+
+        long doneCount = scheduleRepository.countByTypeAndWorkspace_UuidAndStatus(
+                targetType,
+                workspaceId,
+                Schedule.ScheduleStatus.DONE
+        );
+
+        int progress = calculateProgress(totalCount, doneCount);
+
+        return ScheduleProgressResponse.builder()
+                .workspaceId(workspace.getUuid())
+                .workspaceName(workspace.getName())
+                .type(targetType.name())
+                .totalCount(totalCount)
+                .doneCount(doneCount)
+                .progress(progress)
+                .build();
+    }
+
+    private int calculateProgress(long totalCount, long doneCount) {
+        if (totalCount <= 0) {
+            return 0;
+        }
+        return (int) Math.round((doneCount * 100.0) / totalCount);
     }
 
     /**
@@ -452,9 +507,6 @@ public class ScheduleService {
                 .build();
     }
 
-    /**
-     * 개인 워크스페이스 드롭다운
-     */
     public List<ScheduleWorkspaceOptionResponse> getMyPersonalWorkspaces() {
         Long currentUserId = currentUserService.getCurrentUserId();
 
@@ -467,9 +519,6 @@ public class ScheduleService {
                 .toList();
     }
 
-    /**
-     * 팀 워크스페이스 드롭다운
-     */
     public List<ScheduleWorkspaceOptionResponse> getMyTeamWorkspaces() {
         Long currentUserId = currentUserService.getCurrentUserId();
 
@@ -482,9 +531,6 @@ public class ScheduleService {
                 .toList();
     }
 
-    /**
-     * 선택한 팀의 멤버 목록
-     */
     public List<ScheduleTeamMemberResponse> getWorkspaceMembers(String workspaceId) {
         Long currentUserId = currentUserService.getCurrentUserId();
 

@@ -45,3 +45,4 @@ spring:
 jwt:
   secret: aW52YWxpZC1zZWNyZXQta2V5LXRlc3QtdmFsdWUtZm9yLWNhcHN0b25lLXByb2plY3Q=
   expiration: 86400000 # 24시간 (밀리초)
+

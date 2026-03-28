@@ -2,6 +2,7 @@ package com.myide.backend.repository;
 
 import com.myide.backend.domain.Schedule;
 import com.myide.backend.domain.Schedule.ScheduleCategory;
+import com.myide.backend.domain.Schedule.ScheduleStatus;
 import com.myide.backend.domain.Schedule.ScheduleType;
 import org.springframework.data.jpa.repository.JpaRepository;
 
@@ -45,5 +46,17 @@ public interface ScheduleRepository extends JpaRepository<Schedule, Long> {
             LocalDate rangeEnd,
             LocalDate rangeStart,
             ScheduleCategory category
+    );
+
+    // ===== 진행률 계산용 =====
+    long countByTypeAndWorkspace_Uuid(
+            ScheduleType type,
+            String workspaceUuid
+    );
+
+    long countByTypeAndWorkspace_UuidAndStatus(
+            ScheduleType type,
+            String workspaceUuid,
+            ScheduleStatus status
     );
 }
