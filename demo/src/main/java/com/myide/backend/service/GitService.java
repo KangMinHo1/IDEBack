@@ -12,7 +12,6 @@ import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
-import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -106,9 +105,7 @@ public class GitService {
 
                 if (path.startsWith("\"") && path.endsWith("\"")) path = path.substring(1, path.length() - 1);
 
-                if (path.contains(EXCLUDE_KEYWORD)) {
-                    continue;
-                }
+                if (path.contains(EXCLUDE_KEYWORD)) continue;
 
                 if (x.equals("U") || y.equals("U") || (x.equals("A") && y.equals("A")) || (x.equals("D") && y.equals("D"))) {
                     conflicted.add(Map.of("path", path, "status", "conflicted"));
@@ -221,18 +218,19 @@ public class GitService {
         }
     }
 
-    // 💡 [핵심 해결] 병합 충돌 시 예외를 던지지 않고 무시하여 500 에러를 방지합니다!
-    public void merge(Path repoPath, String targetBranch) {
+    // =========================================================================
+    // 💡 [수정] 충돌 발생 여부를 boolean으로 반환하도록 변경 (true: 성공, false: 충돌)
+    // =========================================================================
+    public boolean merge(Path repoPath, String targetBranch) {
         try {
             String output = executeGitCommand(repoPath, "git", "merge", targetBranch);
             log.info("🔀 Merged branch '{}' into current branch. Output: {}", targetBranch, output);
+            return true;
         } catch (Exception e) {
             String errorMsg = e.getMessage();
-            // Git은 병합 충돌 시 에러 코드 1을 반환하므로 예외가 터집니다.
-            // 이를 "서버 에러(500)"가 아닌 "정상적인 충돌 상태"로 간주하고 삼킵니다!
             if (errorMsg != null && (errorMsg.toLowerCase().contains("conflict") || errorMsg.contains("Automatic merge failed"))) {
-                log.warn("🔀 병합 중 충돌(Conflict) 발생! 프론트엔드가 제어하도록 200 OK를 반환합니다.");
-                return; // 💡 여기서 예외를 던지지 않고 조용히 리턴!
+                log.warn("🔀 병합 중 충돌(Conflict) 발생! 프론트엔드가 제어하도록 false를 반환합니다.");
+                return false;
             }
             throw new RuntimeException("Merge 실패: " + errorMsg);
         }
@@ -301,26 +299,49 @@ public class GitService {
         }
     }
 
-    // =========================================================================
-    // 💡 [NEW] 브랜치 및 워크트리 폴더 완벽 삭제 로직
-    // =========================================================================
+    // 💡 [최종 수정] 윈도우의 읽기 전용(Read-Only) 파일까지 강제로 부수고 삭제하는 불도저 로직!
     public void deleteBranch(Path masterRepoPath, Path worktreePath, String branchName) {
         try {
             if ("master".equalsIgnoreCase(branchName)) {
                 throw new IllegalArgumentException("master 브랜치는 삭제할 수 없습니다.");
             }
 
-            // 1. 해당 브랜치의 워크트리 폴더를 Git 명령어로 강제 철거 (-f)
-            executeGitCommand(masterRepoPath, "git", "worktree", "remove", "-f", worktreePath.toAbsolutePath().toString());
-            log.info("🗑️ Worktree Folder Deleted: {}", worktreePath);
+            // 1. 워크트리 제거 명령 (정상적인 워크트리일 경우)
+            try {
+                executeGitCommand(masterRepoPath, "git", "worktree", "remove", "-f", worktreePath.toAbsolutePath().toString());
+                log.info("🗑️ Worktree Folder Deleted: {}", worktreePath);
+            } catch (Exception e) {
+                log.warn("Git worktree remove 실패 (찌꺼기 폴더일 가능성 높음). 강제 삭제 진입...");
+            }
 
-            // 2. 워크트리가 지워졌으니, 이제 Git 시스템에서 브랜치 기록도 강제 삭제 (-D)
-            executeGitCommand(masterRepoPath, "git", "branch", "-D", branchName);
-            log.info("🗑️ Git Branch Deleted: {}", branchName);
+            // 2. 🚨 [핵심] 윈도우 Read-Only 파일 무시하고 강제로 폴더 삭제
+            if (Files.exists(worktreePath)) {
+                try (java.util.stream.Stream<Path> walk = Files.walk(worktreePath)) {
+                    walk.sorted(java.util.Comparator.reverseOrder())
+                            .forEach(p -> {
+                                try {
+                                    p.toFile().setWritable(true); // 읽기 전용 해제 (Windows Git 폴더 삭제의 핵심!)
+                                    Files.delete(p);
+                                } catch (Exception ignored) {
+                                    // 삭제 실패해도 무시하고 다음 파일 진행
+                                }
+                            });
+                } catch (Exception e) {
+                    log.warn("물리적 폴더 강제 삭제 중 일부 실패: {}", e.getMessage());
+                }
+            }
+
+            // 3. 브랜치 기록 삭제
+            try {
+                executeGitCommand(masterRepoPath, "git", "branch", "-D", branchName);
+                log.info("🗑️ Git Branch Deleted: {}", branchName);
+            } catch (Exception e) {
+                log.warn("Git branch 삭제 실패 (이미 지워졌거나 존재하지 않음)");
+            }
 
         } catch (Exception e) {
             log.error("Branch Delete Failed", e);
-            throw new RuntimeException("브랜치 삭제 실패: " + e.getMessage());
+            throw new RuntimeException("브랜치 삭제 로직 에러: " + e.getMessage());
         }
     }
 }
