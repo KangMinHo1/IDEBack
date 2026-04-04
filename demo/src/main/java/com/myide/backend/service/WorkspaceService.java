@@ -7,6 +7,7 @@ import com.myide.backend.domain.workspace.WorkspaceType;
 import com.myide.backend.dto.workspace.InviteMemberRequest;
 import com.myide.backend.dto.workspace.WorkspaceCreateRequest;
 import com.myide.backend.dto.workspace.WorkspaceInvitationResponse;
+import com.myide.backend.dto.workspace.WorkspaceListResponse;
 import com.myide.backend.dto.workspace.WorkspaceMemberResponse;
 import com.myide.backend.repository.UserRepository;
 import com.myide.backend.repository.workspace.WorkspaceMemberRepository;
@@ -20,6 +21,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -56,7 +58,6 @@ public class WorkspaceService {
             Files.createDirectories(rootPath);
             String absolutePath = rootPath.toAbsolutePath().toString();
 
-            // 💡 [핵심 변경] 프론트에서 온 ID로 생성자(User) 객체를 가장 먼저 찾아옵니다.
             Long ownerLongId;
             try {
                 ownerLongId = Long.valueOf(request.getUserId());
@@ -69,7 +70,6 @@ public class WorkspaceService {
 
             Workspace newWorkspace;
 
-            // 💡 찾아온 User 객체를 엔티티 생성 시 넘겨줍니다.
             if (request.getType() == WorkspaceType.TEAM) {
                 newWorkspace = Workspace.createTeam(ownerUser, request.getName(), request.getDescription(), absolutePath);
                 Workspace savedWorkspace = workspaceRepository.save(newWorkspace);
@@ -137,15 +137,13 @@ public class WorkspaceService {
         workspaceMemberRepository.delete(member);
     }
 
-    // =========================================================================
-    // 💡 [신규 추가] 나에게 온 대기 중인 초대 목록 조회 로직
-    // =========================================================================
     @Transactional(readOnly = true)
     public List<WorkspaceInvitationResponse> getPendingInvitations(Long userId) {
-        // 1. 유저 ID와 'PENDING(대기 중)' 상태를 기준으로 멤버 테이블 조회
-        List<WorkspaceMember> pendingMembers = workspaceMemberRepository.findByUser_IdAndStatus(userId, WorkspaceMember.JoinStatus.PENDING);
+        List<WorkspaceMember> pendingMembers = workspaceMemberRepository.findByUser_IdAndStatus(
+                userId,
+                WorkspaceMember.JoinStatus.PENDING
+        );
 
-        // 2. 조회된 엔티티 리스트를 프론트엔드가 렌더링하기 편한 DTO 리스트로 변환
         return pendingMembers.stream()
                 .map(member -> WorkspaceInvitationResponse.builder()
                         .workspaceId(member.getWorkspace().getUuid())
@@ -154,13 +152,12 @@ public class WorkspaceService {
                 .collect(Collectors.toList());
     }
 
-    // =========================================================================
-    // 💡 [신규 추가] 특정 워크스페이스의 실제 참여 팀원 목록 조회
-    // =========================================================================
     @Transactional(readOnly = true)
     public List<WorkspaceMemberResponse> getWorkspaceMembers(String workspaceId) {
-        // 해당 워크스페이스에서 'ACCEPTED(수락됨)' 상태인 멤버만 가져옵니다. (방장도 포함)
-        List<WorkspaceMember> members = workspaceMemberRepository.findByWorkspace_UuidAndStatus(workspaceId, WorkspaceMember.JoinStatus.ACCEPTED);
+        List<WorkspaceMember> members = workspaceMemberRepository.findByWorkspace_UuidAndStatus(
+                workspaceId,
+                WorkspaceMember.JoinStatus.ACCEPTED
+        );
 
         return members.stream()
                 .map(member -> WorkspaceMemberResponse.builder()
@@ -172,9 +169,15 @@ public class WorkspaceService {
                 .collect(Collectors.toList());
     }
 
-    // 💡 [수정] String이 아닌 Long 타입으로 파라미터를 변경하고 try-catch를 걷어냅니다.
-    public List<Workspace> getMyWorkspaces(Long userId) {
-        return workspaceRepository.findMyAllWorkspaces(userId);
+    @Transactional(readOnly = true)
+    public List<WorkspaceListResponse> getMyWorkspaces(Long userId) {
+        return workspaceRepository.findMyAllWorkspaces(userId).stream()
+                .sorted(Comparator.comparing(
+                        Workspace::getUpdatedAt,
+                        Comparator.nullsLast(Comparator.reverseOrder())
+                ))
+                .map(WorkspaceListResponse::from)
+                .collect(Collectors.toList());
     }
 
     public Path getWorkspaceRootPath(String workspaceId) {
