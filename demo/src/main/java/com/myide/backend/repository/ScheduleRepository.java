@@ -4,6 +4,7 @@ import com.myide.backend.domain.Schedule;
 import com.myide.backend.domain.Schedule.ScheduleCategory;
 import com.myide.backend.domain.Schedule.ScheduleStatus;
 import com.myide.backend.domain.Schedule.ScheduleType;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.time.LocalDate;
@@ -48,7 +49,6 @@ public interface ScheduleRepository extends JpaRepository<Schedule, Long> {
             ScheduleCategory category
     );
 
-    // ===== 진행률 계산용 =====
     long countByTypeAndWorkspace_Uuid(
             ScheduleType type,
             String workspaceUuid
@@ -58,5 +58,11 @@ public interface ScheduleRepository extends JpaRepository<Schedule, Long> {
             ScheduleType type,
             String workspaceUuid,
             ScheduleStatus status
+    );
+
+    List<Schedule> findByTypeAndWorkspace_UuidOrderByStartDateDescIdDesc(
+            ScheduleType type,
+            String workspaceUuid,
+            Pageable pageable
     );
 }
