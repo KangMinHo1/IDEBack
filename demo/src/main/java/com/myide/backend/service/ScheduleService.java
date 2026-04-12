@@ -19,6 +19,7 @@ import com.myide.backend.repository.workspace.WorkspaceMemberRepository;
 import com.myide.backend.repository.workspace.WorkspaceRepository;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
@@ -138,10 +139,6 @@ public class ScheduleService {
         scheduleRepository.delete(schedule);
     }
 
-    /**
-     * 진행률 조회
-     * 현재 구조에서는 Schedule이 project와 연결되어 있지 않으므로 workspace 기준으로 계산
-     */
     public ScheduleProgressResponse getProgress(String view, String workspaceId) {
         Long currentUserId = currentUserService.getCurrentUserId();
 
@@ -185,6 +182,40 @@ public class ScheduleService {
                 .build();
     }
 
+    public List<ScheduleResponse> getLatestSchedules(String view, String workspaceId, int size) {
+        Long currentUserId = currentUserService.getCurrentUserId();
+
+        if (size <= 0) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "size는 1 이상이어야 합니다.");
+        }
+
+        Workspace workspace = getWorkspaceOrThrow(workspaceId);
+
+        Schedule.ScheduleType targetType;
+
+        if ("personal".equalsIgnoreCase(view)) {
+            validateWorkspaceMatchesScheduleType(workspace, Schedule.ScheduleType.PERSONAL);
+            validatePersonalWorkspaceAccessible(workspace, currentUserId);
+            targetType = Schedule.ScheduleType.PERSONAL;
+        } else if ("team".equalsIgnoreCase(view)) {
+            validateWorkspaceMatchesScheduleType(workspace, Schedule.ScheduleType.TEAM);
+            validateTeamAccessible(workspace, currentUserId);
+            targetType = Schedule.ScheduleType.TEAM;
+        } else {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "view는 personal 또는 team 중 하나여야 합니다.");
+        }
+
+        return scheduleRepository
+                .findByTypeAndWorkspace_UuidOrderByStartDateDescIdDesc(
+                        targetType,
+                        workspaceId,
+                        PageRequest.of(0, size)
+                )
+                .stream()
+                .map(ScheduleResponse::from)
+                .toList();
+    }
+
     private int calculateProgress(long totalCount, long doneCount) {
         if (totalCount <= 0) {
             return 0;
@@ -192,14 +223,6 @@ public class ScheduleService {
         return (int) Math.round((doneCount * 100.0) / totalCount);
     }
 
-    /**
-     * 특정 날짜 일정 조회
-     * view = personal | team | all
-     *
-     * - personal: PERSONAL workspaceId 필수
-     * - team: TEAM workspaceId 필수
-     * - all: 접근 가능한 모든 PERSONAL/TEAM 워크스페이스 일정 조회
-     */
     public List<ScheduleResponse> getSchedulesByDate(
             String view,
             LocalDate date,
@@ -296,9 +319,6 @@ public class ScheduleService {
                 .toList();
     }
 
-    /**
-     * 월간 캘린더 조회
-     */
     public List<ScheduleResponse> getSchedulesForMonth(
             String view,
             int year,
@@ -362,9 +382,6 @@ public class ScheduleService {
                 .toList();
     }
 
-    /**
-     * 이번 주 일정
-     */
     public List<ScheduleResponse> getSchedulesForWeek(
             String view,
             LocalDate baseDate,
@@ -429,9 +446,6 @@ public class ScheduleService {
                 .toList();
     }
 
-    /**
-     * 이번 달 전체 / 오늘 / 이번 주 통계
-     */
     public ScheduleSummaryResponse getSummary(
             String view,
             LocalDate baseDate,
