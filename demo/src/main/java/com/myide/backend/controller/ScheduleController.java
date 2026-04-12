@@ -23,58 +23,11 @@ public class ScheduleController {
 
     private final ScheduleService scheduleService;
 
-    /**
-     * 일정 생성
-     */
     @PostMapping
     public ScheduleResponse createSchedule(@RequestBody @Valid ScheduleCreateRequest request) {
         return scheduleService.createSchedule(request);
     }
 
-    /**
-     * 일정 상세
-     */
-    @GetMapping("/{scheduleId}")
-    public ScheduleResponse getScheduleDetail(@PathVariable Long scheduleId) {
-        return scheduleService.getScheduleDetail(scheduleId);
-    }
-
-    /**
-     * 일정 수정
-     */
-    @PutMapping("/{scheduleId}")
-    public ScheduleResponse updateSchedule(
-            @PathVariable Long scheduleId,
-            @RequestBody @Valid ScheduleUpdateRequest request
-    ) {
-        return scheduleService.updateSchedule(scheduleId, request);
-    }
-
-    /**
-     * 일정 삭제
-     */
-    @DeleteMapping("/{scheduleId}")
-    public void deleteSchedule(@PathVariable Long scheduleId) {
-        scheduleService.deleteSchedule(scheduleId);
-    }
-
-    /**
-     * 특정 날짜 일정 조회
-     * view = personal | team | all
-     */
-    @GetMapping
-    public List<ScheduleResponse> getSchedulesByDate(
-            @RequestParam String view,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
-            @RequestParam(required = false) String workspaceId,
-            @RequestParam(required = false, defaultValue = "all") String category
-    ) {
-        return scheduleService.getSchedulesByDate(view, date, workspaceId, category);
-    }
-
-    /**
-     * 월간 캘린더 일정 조회
-     */
     @GetMapping("/calendar")
     public List<ScheduleResponse> getSchedulesForMonth(
             @RequestParam String view,
@@ -85,9 +38,6 @@ public class ScheduleController {
         return scheduleService.getSchedulesForMonth(view, year, month, workspaceId);
     }
 
-    /**
-     * 이번 주 일정
-     */
     @GetMapping("/weekly")
     public List<ScheduleResponse> getSchedulesForWeek(
             @RequestParam String view,
@@ -97,9 +47,15 @@ public class ScheduleController {
         return scheduleService.getSchedulesForWeek(view, date, workspaceId);
     }
 
-    /**
-     * 이번달 전체 / 오늘 / 이번주 카운트
-     */
+    @GetMapping("/latest")
+    public List<ScheduleResponse> getLatestSchedules(
+            @RequestParam String view,
+            @RequestParam String workspaceId,
+            @RequestParam(defaultValue = "3") int size
+    ) {
+        return scheduleService.getLatestSchedules(view, workspaceId, size);
+    }
+
     @GetMapping("/summary")
     public ScheduleSummaryResponse getSummary(
             @RequestParam String view,
@@ -109,10 +65,6 @@ public class ScheduleController {
         return scheduleService.getSummary(view, date, workspaceId);
     }
 
-    /**
-     * 진행률 조회
-     * view = personal | team
-     */
     @GetMapping("/progress")
     public ScheduleProgressResponse getProgress(
             @RequestParam String view,
@@ -121,27 +73,46 @@ public class ScheduleController {
         return scheduleService.getProgress(view, workspaceId);
     }
 
-    /**
-     * 개인 워크스페이스 드롭다운
-     */
     @GetMapping("/personal/workspaces")
     public List<ScheduleWorkspaceOptionResponse> getMyPersonalWorkspaces() {
         return scheduleService.getMyPersonalWorkspaces();
     }
 
-    /**
-     * 팀 워크스페이스 드롭다운
-     */
     @GetMapping("/team/workspaces")
     public List<ScheduleWorkspaceOptionResponse> getMyTeamWorkspaces() {
         return scheduleService.getMyTeamWorkspaces();
     }
 
-    /**
-     * 팀 멤버 목록
-     */
     @GetMapping("/team/workspaces/{workspaceId}/members")
     public List<ScheduleTeamMemberResponse> getWorkspaceMembers(@PathVariable String workspaceId) {
         return scheduleService.getWorkspaceMembers(workspaceId);
+    }
+
+    @GetMapping
+    public List<ScheduleResponse> getSchedulesByDate(
+            @RequestParam String view,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
+            @RequestParam(required = false) String workspaceId,
+            @RequestParam(required = false, defaultValue = "all") String category
+    ) {
+        return scheduleService.getSchedulesByDate(view, date, workspaceId, category);
+    }
+
+    @GetMapping("/{scheduleId:\\d+}")
+    public ScheduleResponse getScheduleDetail(@PathVariable Long scheduleId) {
+        return scheduleService.getScheduleDetail(scheduleId);
+    }
+
+    @PutMapping("/{scheduleId:\\d+}")
+    public ScheduleResponse updateSchedule(
+            @PathVariable Long scheduleId,
+            @RequestBody @Valid ScheduleUpdateRequest request
+    ) {
+        return scheduleService.updateSchedule(scheduleId, request);
+    }
+
+    @DeleteMapping("/{scheduleId:\\d+}")
+    public void deleteSchedule(@PathVariable Long scheduleId) {
+        scheduleService.deleteSchedule(scheduleId);
     }
 }
