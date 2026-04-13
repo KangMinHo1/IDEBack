@@ -10,6 +10,7 @@ import com.github.dockerjava.api.model.Ports;
 import com.github.dockerjava.core.command.AttachContainerResultCallback;
 import com.github.dockerjava.core.command.WaitContainerResultCallback;
 import com.myide.backend.domain.LanguageType;
+import com.myide.backend.domain.workspace.TemplateType;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -40,7 +41,6 @@ public class DockerService {
     private final Map<String, String> terminalContainerMap = new ConcurrentHashMap<>();
     private final Map<String, PipedOutputStream> terminalInputMap = new ConcurrentHashMap<>();
 
-    // 💡 [추가] 서버가 켜질 때 딱 한 번 실행되는 찌꺼기 컨테이너 청소기
     @PostConstruct
     public void cleanUpZombieContainers() {
         log.info("🧹 서버 시작: 남아있는 낡은 IDE 컨테이너들을 청소합니다...");
@@ -57,35 +57,66 @@ public class DockerService {
         return workspaceService.getProjectPath(workspaceId, projectName, branchName).toString();
     }
 
-    // --- [Track 1] Run Project (일반 실행) ---
-    public void runProject(WebSocketSession session, String workspaceId, String projectName, String branchName, String filePath, LanguageType language) {
+    private int findFreePort() {
+        try (java.net.ServerSocket socket = new java.net.ServerSocket(0)) {
+            return socket.getLocalPort();
+        } catch (IOException e) {
+            throw new RuntimeException("빈 포트를 찾을 수 없습니다.", e);
+        }
+    }
+
+    public int runProject(WebSocketSession session, String workspaceId, String projectName, String branchName, String filePath, LanguageType language, TemplateType templateType) {
         String sessionId = session.getId();
         stopContainer(sessionId);
+
+        int internalPort = templateType.getDefaultPort();
+        String runCmd = templateType.getRunCommand();
+
+        String targetDir = "";
+        String fileName = filePath;
+
+        if (filePath != null && filePath.contains("/")) {
+            targetDir = filePath.substring(0, filePath.lastIndexOf("/"));
+            fileName = filePath.substring(filePath.lastIndexOf("/") + 1);
+        }
+
+        String finalCmd;
+
+        if (templateType == TemplateType.SPRING_BOOT) {
+            finalCmd = runCmd;
+        } else if (templateType == TemplateType.CONSOLE) {
+            String cmdTemplate = language.getRunCommand();
+            runCmd = cmdTemplate.replace("{file}", fileName)
+                    .replace("src/", "")
+                    .replace("-cp src", "-cp .")
+                    .replace("--project src", "--project .");
+            finalCmd = targetDir.isEmpty() ? runCmd : "cd " + targetDir + " && " + runCmd;
+        } else {
+            finalCmd = targetDir.isEmpty() ? runCmd : "cd " + targetDir + " && " + runCmd;
+        }
+
+        int finalHostPort = internalPort > 0 ? findFreePort() : 0;
 
         new Thread(() -> {
             try {
                 String hostPath = calculateHostPath(workspaceId, projectName, branchName);
-                log.info("🚀 프로젝트 실행: {} (Path: {})", projectName, hostPath);
+                log.info("🚀 도커 실행: 브랜치={}, (Cmd: {}, 내부 포트: {}, 매핑 포트: {})", branchName, finalCmd, internalPort, finalHostPort);
 
-                String targetDir = "";
-                String fileName = filePath;
-                if (filePath != null && filePath.contains("/")) {
-                    targetDir = filePath.substring(0, filePath.lastIndexOf("/"));
-                    fileName = filePath.substring(filePath.lastIndexOf("/") + 1);
-                }
-
-                String cmdTemplate = language.getRunCommand();
-                String runCmd = cmdTemplate.replace("{file}", fileName);
-                runCmd = runCmd.replace("src/", "").replace("-cp src", "-cp .").replace("--project src", "--project .");
-                String finalCmd = targetDir.isEmpty() ? runCmd : "cd " + targetDir + " && " + runCmd;
-
-                CreateContainerResponse container = dockerClient.createContainerCmd("ide-execution-env")
+                var createCmd = dockerClient.createContainerCmd("ide-execution-env")
                         .withWorkingDir("/app")
                         .withTty(false).withStdinOpen(true)
-                        .withEnv("PYTHONUNBUFFERED=1")
-                        .withCmd("sh", "-c", finalCmd)
-                        .exec();
+                        .withEnv("PYTHONUNBUFFERED=1");
 
+                if (internalPort > 0) {
+                    ExposedPort exposedPort = ExposedPort.tcp(internalPort);
+                    Ports portBindings = new Ports();
+                    portBindings.bind(exposedPort, Ports.Binding.bindPort(finalHostPort));
+
+                    createCmd.withExposedPorts(exposedPort)
+                            .withHostConfig(new HostConfig().withPortBindings(portBindings));
+                }
+
+                CreateContainerResponse container = createCmd.withCmd("sh", "-c", finalCmd).exec();
                 String containerId = container.getId();
                 runningContainerMap.put(sessionId, containerId);
 
@@ -120,9 +151,19 @@ public class DockerService {
                         .withFollowStream(true).exec(callback);
 
                 dockerClient.startContainerCmd(containerId).exec();
-                dockerClient.waitContainerCmd(containerId).exec(new WaitContainerResultCallback()).awaitCompletion();
 
-                if (session.isOpen()) session.sendMessage(new TextMessage("\n--- Execution Finished ---\n"));
+                if (templateType == TemplateType.CONSOLE) {
+                    // 도커 프로세스가 끝날 때까지 얌전히 기다립니다.
+                    dockerClient.waitContainerCmd(containerId).exec(new WaitContainerResultCallback()).awaitCompletion();
+
+                    if (session.isOpen()) {
+                        session.sendMessage(new TextMessage("\n--- Execution Finished ---\n"));
+
+                        // 💡 [버그 완벽 해결] 메시지가 프론트에 도착할 0.1초의 틈을 주고 웹소켓을 닫아버립니다!
+                        try { Thread.sleep(100); } catch (InterruptedException ignored) {}
+                        session.close();
+                    }
+                }
 
             } catch (Exception e) {
                 String msg = e.getMessage() != null ? e.getMessage() : "";
@@ -131,12 +172,15 @@ public class DockerService {
                     try { if (session.isOpen()) session.sendMessage(new TextMessage("\n[Error] " + msg)); } catch (IOException ex) {}
                 }
             } finally {
-                stopContainer(sessionId);
+                if (templateType == TemplateType.CONSOLE) {
+                    stopContainer(sessionId);
+                }
             }
         }).start();
+
+        return finalHostPort;
     }
 
-    // --- [Track 2] Debug Project (자바 디버그) ---
     public int debugProject(WebSocketSession session, String workspaceId, String projectName, String branchName, String filePath, LanguageType language, Consumer<String> logHandler) {
         String sessionId = session.getId();
         stopContainer(sessionId);
@@ -193,7 +237,6 @@ public class DockerService {
         }
     }
 
-    // --- [Track 3] Terminal ---
     public void createTerminal(WebSocketSession session, String workspaceId, String projectName, String branchName) throws IOException {
         String sessionId = session.getId();
         String hostPath = calculateHostPath(workspaceId, projectName, branchName);
@@ -320,7 +363,6 @@ public class DockerService {
         } catch (Exception e) { return false; }
     }
 
-    // --- [Track 4] Build Support ---
     public void buildAndCopy(String workspaceId, String cmd, String containerFilePath, String hostFilePath) {
         Path hostWorkspacePath = workspaceService.getProjectPath(workspaceId, "", "master").getParent();
         String containerId = null;
@@ -351,7 +393,6 @@ public class DockerService {
         }
     }
 
-    // --- [Track 5] Python Debug Project ---
     public void debugPython(WebSocketSession session, String workspaceId, String projectName, String branchName, String filePath, Consumer<String> outputCallback) {
         String sessionId = session.getId();
         stopContainer(sessionId);
@@ -412,7 +453,6 @@ public class DockerService {
         }).start();
     }
 
-    // --- [Track 5] 만능 CLI 디버깅 지원 (JS) ---
     public void debugWithCli(WebSocketSession session, String workspaceId, String projectName, String branchName, String debugCmd, Consumer<String> outputCallback) {
         String sessionId = session.getId();
         stopContainer(sessionId);
