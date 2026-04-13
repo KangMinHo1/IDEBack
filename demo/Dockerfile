@@ -58,3 +58,11 @@ WORKDIR /app
 
 # 10. 기본 실행 명령
 CMD ["/bin/bash"]
+
+# (기존 Dockerfile의 5번 아래에 이 내용을 추가해주세요!)docker build -t ide-execution-env .
+
+# 5.5 Gradle (Spring Boot 빌드용) 설치
+RUN wget https://services.gradle.org/distributions/gradle-8.5-bin.zip -P /tmp \
+    && unzip -d /opt/gradle /tmp/gradle-8.5-bin.zip \
+    && ln -s /opt/gradle/gradle-8.5/bin/gradle /usr/bin/gradle \
+    && rm /tmp/gradle-8.5-bin.zip
