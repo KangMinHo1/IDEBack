@@ -10,6 +10,7 @@ import com.github.dockerjava.api.model.Ports;
 import com.github.dockerjava.core.command.AttachContainerResultCallback;
 import com.github.dockerjava.core.command.WaitContainerResultCallback;
 import com.myide.backend.domain.LanguageType;
+import com.myide.backend.domain.workspace.TemplateType;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -40,7 +41,6 @@ public class DockerService {
     private final Map<String, String> terminalContainerMap = new ConcurrentHashMap<>();
     private final Map<String, PipedOutputStream> terminalInputMap = new ConcurrentHashMap<>();
 
-    // 💡 [추가] 서버가 켜질 때 딱 한 번 실행되는 찌꺼기 컨테이너 청소기
     @PostConstruct
     public void cleanUpZombieContainers() {
         log.info("🧹 서버 시작: 남아있는 낡은 IDE 컨테이너들을 청소합니다...");
@@ -57,86 +57,139 @@ public class DockerService {
         return workspaceService.getProjectPath(workspaceId, projectName, branchName).toString();
     }
 
-    // --- [Track 1] Run Project (일반 실행) ---
-    public void runProject(WebSocketSession session, String workspaceId, String projectName, String branchName, String filePath, LanguageType language) {
+    private int findFreePort() {
+        try (java.net.ServerSocket socket = new java.net.ServerSocket(0)) {
+            return socket.getLocalPort();
+        } catch (IOException e) {
+            throw new RuntimeException("빈 포트를 찾을 수 없습니다.", e);
+        }
+    }
+
+    public int runProject(WebSocketSession session, String workspaceId, String projectName, String branchName, String filePath, LanguageType language, TemplateType templateType) {
         String sessionId = session.getId();
         stopContainer(sessionId);
 
-        new Thread(() -> {
-            try {
-                String hostPath = calculateHostPath(workspaceId, projectName, branchName);
-                log.info("🚀 프로젝트 실행: {} (Path: {})", projectName, hostPath);
+        int internalPort = templateType.getDefaultPort();
+        String runCmd = templateType.getRunCommand();
 
-                String targetDir = "";
-                String fileName = filePath;
-                if (filePath != null && filePath.contains("/")) {
-                    targetDir = filePath.substring(0, filePath.lastIndexOf("/"));
-                    fileName = filePath.substring(filePath.lastIndexOf("/") + 1);
-                }
+        String targetDir = "";
+        String fileName = filePath;
 
-                String cmdTemplate = language.getRunCommand();
-                String runCmd = cmdTemplate.replace("{file}", fileName);
-                runCmd = runCmd.replace("src/", "").replace("-cp src", "-cp .").replace("--project src", "--project .");
-                String finalCmd = targetDir.isEmpty() ? runCmd : "cd " + targetDir + " && " + runCmd;
+        if (filePath != null && filePath.contains("/")) {
+            targetDir = filePath.substring(0, filePath.lastIndexOf("/"));
+            fileName = filePath.substring(filePath.lastIndexOf("/") + 1);
+        }
 
-                CreateContainerResponse container = dockerClient.createContainerCmd("ide-execution-env")
-                        .withWorkingDir("/app")
-                        .withTty(false).withStdinOpen(true)
-                        .withEnv("PYTHONUNBUFFERED=1")
-                        .withCmd("sh", "-c", finalCmd)
-                        .exec();
+        String finalCmd;
 
-                String containerId = container.getId();
-                runningContainerMap.put(sessionId, containerId);
+        if (templateType == TemplateType.SPRING_BOOT) {
+            finalCmd = runCmd;
+        } else if (templateType == TemplateType.CONSOLE) {
+            String cmdTemplate = language.getRunCommand();
+            runCmd = cmdTemplate.replace("{file}", fileName)
+                    .replace("src/", "")
+                    .replace("-cp src", "-cp .")
+                    .replace("--project src", "--project .");
+            finalCmd = targetDir.isEmpty() ? runCmd : "cd " + targetDir + " && " + runCmd;
+        } else {
+            finalCmd = targetDir.isEmpty() ? runCmd : "cd " + targetDir + " && " + runCmd;
+        }
 
-                dockerClient.copyArchiveToContainerCmd(containerId).withHostResource(hostPath + "/.").withRemotePath("/app").exec();
+        int finalHostPort = internalPort > 0 ? findFreePort() : 0;
 
-                PipedOutputStream outToDocker = new PipedOutputStream();
-                runInputMap.put(sessionId, outToDocker);
+        // 🚨 [방어 코드 적용] Race Condition을 막기 위해 스레드 진입 전, 동기적으로 컨테이너를 생성하고 맵에 등록합니다.
+        try {
+            String hostPath = calculateHostPath(workspaceId, projectName, branchName);
+            log.info("🚀 도커 실행: 브랜치={}, (Cmd: {}, 내부 포트: {}, 매핑 포트: {})", branchName, finalCmd, internalPort, finalHostPort);
 
-                AttachContainerResultCallback callback = new AttachContainerResultCallback() {
-                    @Override
-                    public void onNext(Frame item) {
-                        try {
-                            if (session.isOpen()) {
-                                session.sendMessage(new TextMessage(new String(item.getPayload(), StandardCharsets.UTF_8)));
-                            }
-                        } catch (IOException e) {}
-                    }
-                    @Override
-                    public void onError(Throwable throwable) {
-                        if (throwable.getMessage() != null &&
-                                (throwable.getMessage().contains("Pipe closed") ||
-                                        throwable.getMessage().contains("Stream closed") ||
-                                        throwable.getMessage().contains("파이프가 끝났습니다"))) {
-                            return;
-                        }
-                        super.onError(throwable);
-                    }
-                };
+            var createCmd = dockerClient.createContainerCmd("ide-execution-env")
+                    .withWorkingDir("/app")
+                    .withTty(false).withStdinOpen(true)
+                    .withEnv("PYTHONUNBUFFERED=1");
 
-                dockerClient.attachContainerCmd(containerId)
-                        .withStdOut(true).withStdErr(true).withStdIn(new PipedInputStream(outToDocker))
-                        .withFollowStream(true).exec(callback);
+            if (internalPort > 0) {
+                ExposedPort exposedPort = ExposedPort.tcp(internalPort);
+                Ports portBindings = new Ports();
+                portBindings.bind(exposedPort, Ports.Binding.bindPort(finalHostPort));
 
-                dockerClient.startContainerCmd(containerId).exec();
-                dockerClient.waitContainerCmd(containerId).exec(new WaitContainerResultCallback()).awaitCompletion();
-
-                if (session.isOpen()) session.sendMessage(new TextMessage("\n--- Execution Finished ---\n"));
-
-            } catch (Exception e) {
-                String msg = e.getMessage() != null ? e.getMessage() : "";
-                if (!msg.contains("Pipe closed") && !msg.contains("Stream closed") && !msg.contains("파이프가 끝났습니다") && !msg.contains("Container died")) {
-                    log.error("Execution Error", e);
-                    try { if (session.isOpen()) session.sendMessage(new TextMessage("\n[Error] " + msg)); } catch (IOException ex) {}
-                }
-            } finally {
-                stopContainer(sessionId);
+                createCmd.withExposedPorts(exposedPort)
+                        .withHostConfig(new HostConfig().withPortBindings(portBindings));
             }
-        }).start();
+
+            CreateContainerResponse container = createCmd.withCmd("sh", "-c", finalCmd).exec();
+            String containerId = container.getId();
+
+            // 🚨 핵심: 스레드가 돌기 전에 무조건 맵에 세션과 컨테이너ID를 묶어둡니다!
+            runningContainerMap.put(sessionId, containerId);
+
+            // 🚨 이제 파일 복사 및 실행 등 오래 걸리는 작업만 백그라운드 스레드로 넘깁니다.
+            new Thread(() -> {
+                try {
+                    dockerClient.copyArchiveToContainerCmd(containerId).withHostResource(hostPath + "/.").withRemotePath("/app").exec();
+
+                    PipedOutputStream outToDocker = new PipedOutputStream();
+                    runInputMap.put(sessionId, outToDocker);
+
+                    AttachContainerResultCallback callback = new AttachContainerResultCallback() {
+                        @Override
+                        public void onNext(Frame item) {
+                            try {
+                                if (session.isOpen()) {
+                                    session.sendMessage(new TextMessage(new String(item.getPayload(), StandardCharsets.UTF_8)));
+                                }
+                            } catch (IOException e) {}
+                        }
+                        @Override
+                        public void onError(Throwable throwable) {
+                            if (throwable.getMessage() != null &&
+                                    (throwable.getMessage().contains("Pipe closed") ||
+                                            throwable.getMessage().contains("Stream closed") ||
+                                            throwable.getMessage().contains("파이프가 끝났습니다"))) {
+                                return;
+                            }
+                            super.onError(throwable);
+                        }
+                    };
+
+                    dockerClient.attachContainerCmd(containerId)
+                            .withStdOut(true).withStdErr(true).withStdIn(new PipedInputStream(outToDocker))
+                            .withFollowStream(true).exec(callback);
+
+                    dockerClient.startContainerCmd(containerId).exec();
+
+                    if (templateType == TemplateType.CONSOLE) {
+                        dockerClient.waitContainerCmd(containerId).exec(new WaitContainerResultCallback()).awaitCompletion();
+
+                        if (session.isOpen()) {
+                            session.sendMessage(new TextMessage("\n--- Execution Finished ---\n"));
+                            try { Thread.sleep(100); } catch (InterruptedException ignored) {}
+                            session.close();
+                        }
+                    }
+
+                } catch (Exception e) {
+                    String msg = e.getMessage() != null ? e.getMessage() : "";
+                    if (!msg.contains("Pipe closed") && !msg.contains("Stream closed") && !msg.contains("파이프가 끝났습니다") && !msg.contains("Container died")) {
+                        log.error("Execution Error", e);
+                        try { if (session.isOpen()) session.sendMessage(new TextMessage("\n[Error] " + msg)); } catch (IOException ex) {}
+                    }
+                } finally {
+                    if (templateType == TemplateType.CONSOLE) {
+                        stopContainer(sessionId);
+                    }
+                }
+            }).start();
+
+        } catch (Exception e) {
+            log.error("도커 컨테이너 생성 중 치명적 에러 발생", e);
+            try {
+                if (session.isOpen()) session.sendMessage(new TextMessage("\n[Error] 도커 실행 환경을 구성할 수 없습니다. " + e.getMessage()));
+            } catch (IOException ex) {}
+        }
+
+        return finalHostPort;
     }
 
-    // --- [Track 2] Debug Project (자바 디버그) ---
     public int debugProject(WebSocketSession session, String workspaceId, String projectName, String branchName, String filePath, LanguageType language, Consumer<String> logHandler) {
         String sessionId = session.getId();
         stopContainer(sessionId);
@@ -193,7 +246,6 @@ public class DockerService {
         }
     }
 
-    // --- [Track 3] Terminal ---
     public void createTerminal(WebSocketSession session, String workspaceId, String projectName, String branchName) throws IOException {
         String sessionId = session.getId();
         String hostPath = calculateHostPath(workspaceId, projectName, branchName);
@@ -320,7 +372,6 @@ public class DockerService {
         } catch (Exception e) { return false; }
     }
 
-    // --- [Track 4] Build Support ---
     public void buildAndCopy(String workspaceId, String cmd, String containerFilePath, String hostFilePath) {
         Path hostWorkspacePath = workspaceService.getProjectPath(workspaceId, "", "master").getParent();
         String containerId = null;
@@ -351,111 +402,121 @@ public class DockerService {
         }
     }
 
-    // --- [Track 5] Python Debug Project ---
     public void debugPython(WebSocketSession session, String workspaceId, String projectName, String branchName, String filePath, Consumer<String> outputCallback) {
         String sessionId = session.getId();
         stopContainer(sessionId);
 
-        new Thread(() -> {
-            try {
-                String hostPath = calculateHostPath(workspaceId, projectName, branchName);
-                String targetDir = ""; String fileName = filePath;
-                if (filePath != null && filePath.contains("/")) {
-                    targetDir = filePath.substring(0, filePath.lastIndexOf("/"));
-                    fileName = filePath.substring(filePath.lastIndexOf("/") + 1);
-                }
-
-                String runCmd = "python3 -u -m pdb " + fileName;
-                String finalCmd = targetDir.isEmpty() ? runCmd : "cd " + targetDir + " && " + runCmd;
-
-                log.info("🐍 파이썬 디버그 컨테이너 생성: {}", finalCmd);
-
-                CreateContainerResponse container = dockerClient.createContainerCmd("ide-execution-env")
-                        .withWorkingDir("/app")
-                        .withTty(false).withStdinOpen(true)
-                        .withCmd("sh", "-c", finalCmd)
-                        .exec();
-
-                String containerId = container.getId();
-                runningContainerMap.put(sessionId, containerId);
-
-                dockerClient.copyArchiveToContainerCmd(containerId).withHostResource(hostPath + "/.").withRemotePath("/app").exec();
-
-                PipedOutputStream fakeIntercom = new PipedOutputStream();
-                PipedInputStream fakeReceiver = new PipedInputStream(fakeIntercom);
-
-                AttachContainerResultCallback callback = new AttachContainerResultCallback() {
-                    @Override
-                    public void onNext(Frame item) {
-                        outputCallback.accept(new String(item.getPayload(), StandardCharsets.UTF_8));
-                    }
-                    @Override
-                    public void onError(Throwable throwable) {
-                        if (throwable.getMessage() != null && (throwable.getMessage().contains("Pipe closed") || throwable.getMessage().contains("Stream closed"))) return;
-                        super.onError(throwable);
-                    }
-                };
-
-                dockerClient.attachContainerCmd(containerId)
-                        .withStdOut(true).withStdErr(true)
-                        .withStdIn(fakeReceiver)
-                        .withFollowStream(true).exec(callback);
-
-                dockerClient.startContainerCmd(containerId).exec();
-                dockerClient.waitContainerCmd(containerId).exec(new WaitContainerResultCallback()).awaitCompletion();
-
-            } catch (Exception e) {
-                log.error("Python Debug Error", e);
-            } finally {
-                stopContainer(sessionId);
+        // 🚨 [방어 코드 적용] 생성 및 등록을 스레드 밖으로 이동!
+        try {
+            String hostPath = calculateHostPath(workspaceId, projectName, branchName);
+            String targetDir = ""; String fileName = filePath;
+            if (filePath != null && filePath.contains("/")) {
+                targetDir = filePath.substring(0, filePath.lastIndexOf("/"));
+                fileName = filePath.substring(filePath.lastIndexOf("/") + 1);
             }
-        }).start();
+
+            String runCmd = "python3 -u -m pdb " + fileName;
+            String finalCmd = targetDir.isEmpty() ? runCmd : "cd " + targetDir + " && " + runCmd;
+
+            log.info("🐍 파이썬 디버그 컨테이너 생성: {}", finalCmd);
+
+            CreateContainerResponse container = dockerClient.createContainerCmd("ide-execution-env")
+                    .withWorkingDir("/app")
+                    .withTty(false).withStdinOpen(true)
+                    .withCmd("sh", "-c", finalCmd)
+                    .exec();
+
+            String containerId = container.getId();
+            runningContainerMap.put(sessionId, containerId);
+
+            new Thread(() -> {
+                try {
+                    dockerClient.copyArchiveToContainerCmd(containerId).withHostResource(hostPath + "/.").withRemotePath("/app").exec();
+
+                    PipedOutputStream fakeIntercom = new PipedOutputStream();
+                    PipedInputStream fakeReceiver = new PipedInputStream(fakeIntercom);
+
+                    AttachContainerResultCallback callback = new AttachContainerResultCallback() {
+                        @Override
+                        public void onNext(Frame item) {
+                            outputCallback.accept(new String(item.getPayload(), StandardCharsets.UTF_8));
+                        }
+                        @Override
+                        public void onError(Throwable throwable) {
+                            if (throwable.getMessage() != null && (throwable.getMessage().contains("Pipe closed") || throwable.getMessage().contains("Stream closed"))) return;
+                            super.onError(throwable);
+                        }
+                    };
+
+                    dockerClient.attachContainerCmd(containerId)
+                            .withStdOut(true).withStdErr(true)
+                            .withStdIn(fakeReceiver)
+                            .withFollowStream(true).exec(callback);
+
+                    dockerClient.startContainerCmd(containerId).exec();
+                    dockerClient.waitContainerCmd(containerId).exec(new WaitContainerResultCallback()).awaitCompletion();
+
+                } catch (Exception e) {
+                    log.error("Python Debug Error", e);
+                } finally {
+                    stopContainer(sessionId);
+                }
+            }).start();
+
+        } catch (Exception e) {
+            log.error("파이썬 디버그 컨테이너 생성 실패", e);
+        }
     }
 
-    // --- [Track 5] 만능 CLI 디버깅 지원 (JS) ---
     public void debugWithCli(WebSocketSession session, String workspaceId, String projectName, String branchName, String debugCmd, Consumer<String> outputCallback) {
         String sessionId = session.getId();
         stopContainer(sessionId);
 
-        new Thread(() -> {
-            try {
-                String hostPath = calculateHostPath(workspaceId, projectName, branchName);
-                log.info("💻 만능 CLI 디버거 실행: {}", debugCmd);
+        // 🚨 [방어 코드 적용] 생성 및 등록을 스레드 밖으로 이동!
+        try {
+            String hostPath = calculateHostPath(workspaceId, projectName, branchName);
+            log.info("💻 만능 CLI 디버거 실행: {}", debugCmd);
 
-                CreateContainerResponse container = dockerClient.createContainerCmd("ide-execution-env")
-                        .withWorkingDir("/app")
-                        .withTty(false).withStdinOpen(true)
-                        .withCmd("sh", "-c", debugCmd)
-                        .exec();
+            CreateContainerResponse container = dockerClient.createContainerCmd("ide-execution-env")
+                    .withWorkingDir("/app")
+                    .withTty(false).withStdinOpen(true)
+                    .withCmd("sh", "-c", debugCmd)
+                    .exec();
 
-                String containerId = container.getId();
-                runningContainerMap.put(sessionId, containerId);
+            String containerId = container.getId();
+            runningContainerMap.put(sessionId, containerId);
 
-                dockerClient.copyArchiveToContainerCmd(containerId).withHostResource(hostPath + "/.").withRemotePath("/app").exec();
+            new Thread(() -> {
+                try {
+                    dockerClient.copyArchiveToContainerCmd(containerId).withHostResource(hostPath + "/.").withRemotePath("/app").exec();
 
-                AttachContainerResultCallback callback = new AttachContainerResultCallback() {
-                    @Override
-                    public void onNext(Frame item) {
-                        outputCallback.accept(new String(item.getPayload(), StandardCharsets.UTF_8));
-                    }
-                    @Override
-                    public void onError(Throwable throwable) {
-                        if (throwable.getMessage() != null && (throwable.getMessage().contains("Pipe closed") || throwable.getMessage().contains("Stream closed"))) return;
-                        super.onError(throwable);
-                    }
-                };
+                    AttachContainerResultCallback callback = new AttachContainerResultCallback() {
+                        @Override
+                        public void onNext(Frame item) {
+                            outputCallback.accept(new String(item.getPayload(), StandardCharsets.UTF_8));
+                        }
+                        @Override
+                        public void onError(Throwable throwable) {
+                            if (throwable.getMessage() != null && (throwable.getMessage().contains("Pipe closed") || throwable.getMessage().contains("Stream closed"))) return;
+                            super.onError(throwable);
+                        }
+                    };
 
-                dockerClient.attachContainerCmd(containerId)
-                        .withStdOut(true).withStdErr(true).withFollowStream(true).exec(callback);
+                    dockerClient.attachContainerCmd(containerId)
+                            .withStdOut(true).withStdErr(true).withFollowStream(true).exec(callback);
 
-                dockerClient.startContainerCmd(containerId).exec();
-                dockerClient.waitContainerCmd(containerId).exec(new WaitContainerResultCallback()).awaitCompletion();
+                    dockerClient.startContainerCmd(containerId).exec();
+                    dockerClient.waitContainerCmd(containerId).exec(new WaitContainerResultCallback()).awaitCompletion();
 
-            } catch (Exception e) {
-                log.error("CLI Debug Error", e);
-            } finally {
-                stopContainer(sessionId);
-            }
-        }).start();
+                } catch (Exception e) {
+                    log.error("CLI Debug Error", e);
+                } finally {
+                    stopContainer(sessionId);
+                }
+            }).start();
+
+        } catch (Exception e) {
+            log.error("CLI 디버거 컨테이너 생성 실패", e);
+        }
     }
 }
