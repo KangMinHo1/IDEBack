@@ -47,4 +47,8 @@ public class User {
     public void updatePassword(String newPassword) {
         this.password = newPassword;
     }
+    // 마이페이지 계정 탭 - 이메일 변경용~~
+    public void updateEmail(String email) {
+        this.email = email;
+    }
 }

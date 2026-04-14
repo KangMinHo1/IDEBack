@@ -176,7 +176,8 @@ public class WorkspaceService {
                         Workspace::getUpdatedAt,
                         Comparator.nullsLast(Comparator.reverseOrder())
                 ))
-                .map(WorkspaceListResponse::from)
+                // ✅ 현재 사용자 기준 role 계산을 위해 userId 전달
+                .map(workspace -> WorkspaceListResponse.from(workspace, userId))
                 .collect(Collectors.toList());
     }
 

@@ -33,6 +33,28 @@ public class UserDto {
         private String nickname;
         private String profileImageUrl;
     }
+
+    // 마이페이지 계정 탭 - 이메일 변경 요청 DTO ~~
+    @Getter
+    @NoArgsConstructor
+    public static class ChangeEmailRequest {
+        @NotBlank(message = "이메일은 필수입니다.")
+        @Email(message = "이메일 형식이 올바르지 않습니다.")
+        private String email;
+    }
+
+    // 마이페이지 계정 탭 - 비밀번호 변경 요청 DTO ~~
+    @Getter
+    @NoArgsConstructor
+    public static class ChangePasswordRequest {
+        @NotBlank(message = "현재 비밀번호는 필수입니다.")
+        private String currentPassword;
+
+        @NotBlank(message = "새 비밀번호는 필수입니다.")
+        private String newPassword;
+    }
+
+
     // 회원 조회
     @Getter
     @Builder

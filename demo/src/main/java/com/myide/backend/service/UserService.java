@@ -50,12 +50,55 @@ public class UserService {
         return mapToResponse(user);
     }
 
+    // 이메일 변경~~
+    @Transactional
+    public UserDto.Response changeEmail(Long userId, UserDto.ChangeEmailRequest request) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 회원입니다."));
+
+        // 본인 현재 이메일과 같으면 그대로 반환
+        if (user.getEmail().equals(request.getEmail())) {
+            return mapToResponse(user);
+        }
+
+        if (userRepository.existsByEmail(request.getEmail())) {
+            throw new IllegalArgumentException("이미 사용 중인 이메일입니다.");
+        }
+
+        user.updateEmail(request.getEmail());
+        return mapToResponse(user);
+    }
+
+    // 비밀번호 변경 ~~
+    @Transactional
+    public void changePassword(Long userId, UserDto.ChangePasswordRequest request) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 회원입니다."));
+
+        // 현재 비밀번호가 맞는지 검증
+        if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPassword())) {
+            throw new IllegalArgumentException("현재 비밀번호가 일치하지 않습니다.");
+        }
+
+        // 새 비밀번호 최소 길이 검증
+        if (request.getNewPassword().length() < 8) {
+            throw new IllegalArgumentException("새 비밀번호는 8자 이상이어야 합니다.");
+        }
+
+        // 새 비밀번호 암호화 후 저장
+        user.updatePassword(passwordEncoder.encode(request.getNewPassword()));
+    }
+
+
+
+
     @Transactional
     public void deleteUser(Long userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 회원입니다."));
         userRepository.delete(user);
     }
+
 
     private UserDto.Response mapToResponse(User user) {
         return UserDto.Response.builder()
