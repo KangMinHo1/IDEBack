@@ -2,10 +2,12 @@ package com.myide.backend.dto.user;
 
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+
 import java.time.LocalDateTime;
 
 public class UserDto {
@@ -19,22 +21,24 @@ public class UserDto {
         private String email;
 
         @NotBlank(message = "비밀번호는 필수입니다.")
+        @Size(min = 8, message = "비밀번호는 8자 이상이어야 합니다.")
         private String password;
 
         @NotBlank(message = "닉네임은 필수입니다.")
         private String nickname;
     }
 
-    //회원 수정
+    // 회원 수정
     @Getter
     @NoArgsConstructor
     public static class UpdateRequest {
         @NotBlank(message = "닉네임은 필수입니다.")
         private String nickname;
+
         private String profileImageUrl;
     }
 
-    // 마이페이지 계정 탭 - 이메일 변경 요청 DTO ~~
+    // 마이페이지 계정 탭 - 이메일 변경 요청 DTO
     @Getter
     @NoArgsConstructor
     public static class ChangeEmailRequest {
@@ -43,7 +47,7 @@ public class UserDto {
         private String email;
     }
 
-    // 마이페이지 계정 탭 - 비밀번호 변경 요청 DTO ~~
+    // 마이페이지 계정 탭 - 비밀번호 변경 요청 DTO
     @Getter
     @NoArgsConstructor
     public static class ChangePasswordRequest {
@@ -51,9 +55,18 @@ public class UserDto {
         private String currentPassword;
 
         @NotBlank(message = "새 비밀번호는 필수입니다.")
+        @Size(min = 8, message = "새 비밀번호는 8자 이상이어야 합니다.")
         private String newPassword;
     }
 
+    // 공통 메시지 응답
+    @Getter
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class MessageResponse {
+        private String message;
+    }
 
     // 회원 조회
     @Getter

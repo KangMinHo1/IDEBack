@@ -14,9 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class UserService {
 
     private final UserRepository userRepository;
-    private final PasswordEncoder passwordEncoder; // 💡 암호화 도구 주입
-
-
+    private final PasswordEncoder passwordEncoder;
 
     @Transactional
     public UserDto.Response createUser(UserDto.CreateRequest request) {
@@ -24,9 +22,12 @@ public class UserService {
             throw new IllegalArgumentException("이미 사용 중인 이메일입니다.");
         }
 
+        if (userRepository.existsByNickname(request.getNickname())) {
+            throw new IllegalArgumentException("이미 사용 중인 닉네임입니다.");
+        }
+
         User user = User.builder()
                 .email(request.getEmail())
-                // 💡 [핵심] 프론트에서 온 평문 비밀번호를 암호화해서 DB에 저장!
                 .password(passwordEncoder.encode(request.getPassword()))
                 .nickname(request.getNickname())
                 .build();
@@ -36,27 +37,28 @@ public class UserService {
     }
 
     public UserDto.Response getUser(Long userId) {
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 회원입니다."));
+        User user = findUserById(userId);
         return mapToResponse(user);
     }
 
     @Transactional
     public UserDto.Response updateUser(Long userId, UserDto.UpdateRequest request) {
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 회원입니다."));
+        User user = findUserById(userId);
+
+        if (!user.getNickname().equals(request.getNickname())
+                && userRepository.existsByNickname(request.getNickname())) {
+            throw new IllegalArgumentException("이미 사용 중인 닉네임입니다.");
+        }
 
         user.updateProfile(request.getNickname(), request.getProfileImageUrl());
         return mapToResponse(user);
     }
 
-    // 이메일 변경~~
+    // 마이페이지 계정 탭 - 이메일 변경
     @Transactional
     public UserDto.Response changeEmail(Long userId, UserDto.ChangeEmailRequest request) {
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 회원입니다."));
+        User user = findUserById(userId);
 
-        // 본인 현재 이메일과 같으면 그대로 반환
         if (user.getEmail().equals(request.getEmail())) {
             return mapToResponse(user);
         }
@@ -69,36 +71,41 @@ public class UserService {
         return mapToResponse(user);
     }
 
-    // 비밀번호 변경 ~~
+    // 마이페이지 계정 탭 - 비밀번호 변경
     @Transactional
     public void changePassword(Long userId, UserDto.ChangePasswordRequest request) {
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 회원입니다."));
+        User user = findUserById(userId);
 
-        // 현재 비밀번호가 맞는지 검증
+        // 1. 현재 비밀번호 확인
         if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPassword())) {
             throw new IllegalArgumentException("현재 비밀번호가 일치하지 않습니다.");
         }
 
-        // 새 비밀번호 최소 길이 검증
+        // 2. 새 비밀번호 길이 확인
         if (request.getNewPassword().length() < 8) {
             throw new IllegalArgumentException("새 비밀번호는 8자 이상이어야 합니다.");
         }
 
-        // 새 비밀번호 암호화 후 저장
-        user.updatePassword(passwordEncoder.encode(request.getNewPassword()));
+        // 3. 기존 비밀번호와 같은지 확인
+        if (passwordEncoder.matches(request.getNewPassword(), user.getPassword())) {
+            throw new IllegalArgumentException("새 비밀번호는 현재 비밀번호와 달라야 합니다.");
+        }
+
+        // 4. 새 비밀번호 암호화 후 저장
+        String encodedNewPassword = passwordEncoder.encode(request.getNewPassword());
+        user.updatePassword(encodedNewPassword);
     }
-
-
-
 
     @Transactional
     public void deleteUser(Long userId) {
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 회원입니다."));
+        User user = findUserById(userId);
         userRepository.delete(user);
     }
 
+    private User findUserById(Long userId) {
+        return userRepository.findById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 회원입니다."));
+    }
 
     private UserDto.Response mapToResponse(User user) {
         return UserDto.Response.builder()
