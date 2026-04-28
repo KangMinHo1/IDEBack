@@ -13,10 +13,10 @@ import com.myide.backend.domain.CodeSummary;
 import com.myide.backend.dto.codemap.CreateComponentRequest;
 import com.myide.backend.dto.codemap.CreateRelationRequest;
 import com.myide.backend.dto.codemap.CodeMapResponse;
-import com.myide.backend.dto.codemap.CodeGenerateRequest; // 💡 임포트 추가
+import com.myide.backend.dto.codemap.CodeGenerateRequest;
 import com.myide.backend.repository.codemap.CodeMapCacheRepository;
 import com.myide.backend.repository.codemap.CodeSummaryRepository;
-import com.myide.backend.service.analyzer.JavaAnalyzer;
+import com.myide.backend.service.analyzer.CodeAnalyzer; // 💡 [추가] 다국어 분석기 인터페이스
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -42,14 +42,24 @@ public class CodeMapService {
     private final WorkspaceService workspaceService;
     private final CodeMapCacheRepository codeMapCacheRepository;
     private final ObjectMapper objectMapper;
-    private final JavaAnalyzer javaAnalyzer;
+
+    // 💡 [변경] JavaAnalyzer 1개가 아니라, 구현된 모든 분석기를 리스트로 주입받습니다!
+    private final List<CodeAnalyzer> analyzers;
 
     // =========================================================================
     // 💡 [아키텍처 핵심] 코드맵 분석 및 DB 캐싱 (DTO 역직렬화 정석 버전)
     // =========================================================================
+
+    // 💡 Controller에서 넘어오는 language 파라미터가 없을 때를 대비한 오버로딩
     @Transactional
     public CodeMapResponse getAnalyzedCodeMap(String workspaceId, String projectName, String branchName) {
+        return getAnalyzedCodeMap(workspaceId, projectName, branchName, "JAVA");
+    }
+
+    @Transactional
+    public CodeMapResponse getAnalyzedCodeMap(String workspaceId, String projectName, String branchName, String language) {
         String safeBranch = branchName == null ? "master" : branchName;
+        String safeLanguage = language == null ? "JAVA" : language;
 
         Optional<CodeMapCache> cachedData = codeMapCacheRepository.findByWorkspaceIdAndProjectNameAndBranchName(workspaceId, projectName, safeBranch);
 
@@ -64,8 +74,10 @@ public class CodeMapService {
             }
         }
 
-        log.info("🐢 [CodeMap] 캐시 미스! 전체 파일 파싱을 시작합니다.");
-        CodeMapResponse analyzedData = doAnalyzeWorkspace(workspaceId, projectName, safeBranch);
+        log.info("🐢 [CodeMap] 캐시 미스! {} 언어 파일 파싱을 시작합니다.", safeLanguage);
+
+        // 💡 언어에 맞는 분석기 실행
+        CodeMapResponse analyzedData = doAnalyzeWorkspace(workspaceId, projectName, safeBranch, safeLanguage);
 
         try {
             String json = objectMapper.writeValueAsString(analyzedData);
@@ -97,9 +109,15 @@ public class CodeMapService {
         codeMapCacheRepository.deleteByWorkspaceIdAndProjectNameAndBranchName(workspaceId, projectName, safeBranch);
     }
 
-    private CodeMapResponse doAnalyzeWorkspace(String workspaceId, String projectName, String branchName) {
+    private CodeMapResponse doAnalyzeWorkspace(String workspaceId, String projectName, String branchName, String language) {
         Path projectPath = workspaceService.getProjectPath(workspaceId, projectName, branchName);
-        return javaAnalyzer.analyze(projectPath.toString());
+
+        CodeAnalyzer selectedAnalyzer = analyzers.stream()
+                .filter(analyzer -> analyzer.supports(language))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("지원하지 않는 언어 템플릿입니다: " + language));
+
+        return selectedAnalyzer.analyze(projectPath.toString());
     }
 
     // =========================================================================
@@ -109,13 +127,26 @@ public class CodeMapService {
     @Transactional
     public void createComponent(CreateComponentRequest req) {
         Path branchPath = workspaceService.getProjectPath(req.getWorkspaceId(), req.getProjectName(), req.getBranchName());
-        Path filePath = branchPath.resolve(req.getName() + ".java");
 
-        if (Files.exists(filePath)) {
-            throw new RuntimeException("이미 존재하는 컴포넌트입니다: " + req.getName() + ".java");
+        String ext = ".java";
+        String boilerplateCode = "";
+
+        // 💡 [수정됨] 템플릿 타입에 따라 확장자와 뼈대 코드를 다르게 생성합니다!
+        if ("REACT_COMPONENT".equals(req.getType())) {
+            ext = ".jsx";
+            boilerplateCode = "import React from 'react';\n\nexport default function " + req.getName() + "() {\n    return (\n        <div className=\"p-4\">\n            <h1>" + req.getName() + " Component</h1>\n        </div>\n    );\n}\n";
+        } else if ("PYTHON_CLASS".equals(req.getType())) {
+            ext = ".py";
+            boilerplateCode = "class " + req.getName() + ":\n    def __init__(self):\n        pass\n";
+        } else {
+            boilerplateCode = generateJavaBoilerplate(req.getName(), req.getType());
         }
 
-        String boilerplateCode = generateJavaBoilerplate(req.getName(), req.getType());
+        Path filePath = branchPath.resolve(req.getName() + ext);
+
+        if (Files.exists(filePath)) {
+            throw new RuntimeException("이미 존재하는 컴포넌트입니다: " + req.getName() + ext);
+        }
 
         try {
             Files.writeString(filePath, boilerplateCode, StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
@@ -147,11 +178,21 @@ public class CodeMapService {
         return code.toString();
     }
 
+    // 💡 [추가됨] JavaParser가 .jsx나 .py를 파싱하다가 서버가 터지는 것을 막는 방어 코드!
+    private void checkValidJavaFile(String fileName) {
+        if (fileName.endsWith(".js") || fileName.endsWith(".jsx") || fileName.endsWith(".py") || fileName.endsWith(".ts")) {
+            throw new RuntimeException("🚨 자동 코드 주입 기능은 현재 Java 환경에서만 완벽 지원됩니다. (React/Python 구문 분석기는 탑재 예정입니다.)");
+        }
+    }
+
     @Transactional
     public void createRelation(CreateRelationRequest req) {
-        String sourceFileName = req.getSourceNode().endsWith(".java") ? req.getSourceNode() : req.getSourceNode() + ".java";
-        String targetPath = req.getTargetNode();
+        String sourceFileName = req.getSourceNode();
+        if (!sourceFileName.contains(".")) sourceFileName += ".java"; // 확장자가 안 넘어올 경우 대비
 
+        checkValidJavaFile(sourceFileName); // 💡 [방어 코드 적용]
+
+        String targetPath = req.getTargetNode();
         Path projectPath = workspaceService.getProjectPath(req.getWorkspaceId(), req.getProjectName(), req.getBranchName());
         Path sourcePath = projectPath.resolve(sourceFileName);
         Path targetFileFullPath = projectPath.resolve(targetPath.endsWith(".java") ? targetPath : targetPath + ".java");
@@ -212,7 +253,10 @@ public class CodeMapService {
 
     @Transactional
     public void deleteRelation(CreateRelationRequest req) {
-        String sourceFileName = req.getSourceNode().endsWith(".java") ? req.getSourceNode() : req.getSourceNode() + ".java";
+        String sourceFileName = req.getSourceNode();
+        if (!sourceFileName.contains(".")) sourceFileName += ".java";
+
+        checkValidJavaFile(sourceFileName); // 💡 [방어 코드 적용]
 
         String rawTarget = req.getTargetNode().replace(".java", "");
         if (rawTarget.contains("/")) {
@@ -284,7 +328,11 @@ public class CodeMapService {
     public void generateCodeComponent(CodeGenerateRequest req) {
         try {
             Path projectPath = workspaceService.getProjectPath(req.getWorkspaceId(), req.getProjectName(), req.getBranchName());
-            String fileName = req.getClassName().endsWith(".java") ? req.getClassName() : req.getClassName() + ".java";
+            String fileName = req.getClassName();
+            if (!fileName.contains(".")) fileName += ".java";
+
+            checkValidJavaFile(fileName); // 💡 [방어 코드 적용]
+
             Path targetFile = projectPath.resolve(fileName);
 
             if (!Files.exists(targetFile)) {
@@ -298,7 +346,6 @@ public class CodeMapService {
 
             Modifier.Keyword modifier = Modifier.Keyword.valueOf(req.getAccessModifier().toUpperCase());
 
-            // 💡 [1] 변수 추가 로직
             if ("VARIABLE".equalsIgnoreCase(req.getTargetType())) {
                 if (targetClass.getFieldByName(req.getName()).isPresent()) {
                     throw new RuntimeException("이미 존재하는 변수명입니다: " + req.getName());
@@ -306,13 +353,11 @@ public class CodeMapService {
 
                 FieldDeclaration field = targetClass.addField(req.getDataType(), req.getName(), modifier);
 
-                // ✨ 초기값이 입력되었다면 세팅해줍니다. (예: = 100;)
                 if (req.getInitialValue() != null && !req.getInitialValue().trim().isEmpty()) {
                     field.getVariable(0).setInitializer(req.getInitialValue());
                 }
                 log.info("✅ [CodeMap] 변수 추가 완료: {} {} {}", req.getAccessModifier(), req.getDataType(), req.getName());
 
-                // 💡 [2] 메서드 추가 로직
             } else if ("METHOD".equalsIgnoreCase(req.getTargetType())) {
                 if (!targetClass.getMethodsByName(req.getName()).isEmpty()) {
                     throw new RuntimeException("동일한 이름의 메서드가 이미 존재합니다.");
@@ -321,7 +366,6 @@ public class CodeMapService {
                 com.github.javaparser.ast.body.MethodDeclaration method = targetClass.addMethod(req.getName(), modifier)
                         .setType(req.getDataType());
 
-                // ✨ 파라미터가 있다면 콤마(,)로 분리해서 파싱 후 주입합니다.
                 if (req.getParameters() != null && !req.getParameters().trim().isEmpty()) {
                     String[] params = req.getParameters().split(",");
                     for (String param : params) {
@@ -331,7 +375,6 @@ public class CodeMapService {
                     }
                 }
 
-                // ✨ 메서드 내부 코드(Body)가 있다면 주입하고, 없으면 빈 괄호 {}를 넣습니다.
                 String bodyCode = "{}";
                 if (req.getBody() != null && !req.getBody().trim().isEmpty()) {
                     bodyCode = "{\n" + req.getBody() + "\n}";

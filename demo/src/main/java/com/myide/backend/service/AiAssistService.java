@@ -1,4 +1,3 @@
-// 경로: src/main/java/com/myide/backend/service/AiAssistService.java
 package com.myide.backend.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -23,8 +22,10 @@ public class AiAssistService {
 
     public AiAssistResponse getAiSuggestion(AiAssistRequest req) {
         try {
+            // 💡 [수정됨] 4번째 인자로 "JAVA"를 명시적으로 추가하여 컴파일 에러 완벽 해결!
             CodeMapResponse contextMap = codeMapService.getAnalyzedCodeMap(
-                    req.getWorkspaceId(), req.getProjectName(), req.getBranchName());
+                    req.getWorkspaceId(), req.getProjectName(), req.getBranchName(), "JAVA");
+
             String projectContext = formatContext(contextMap);
 
             String prompt = String.format(

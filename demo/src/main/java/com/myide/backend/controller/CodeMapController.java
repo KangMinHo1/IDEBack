@@ -25,7 +25,8 @@ public class CodeMapController {
             @RequestParam(required = false, defaultValue = "master") String branchName,
             @RequestParam(required = false, defaultValue = "JAVA") String language) {
 
-        CodeMapResponse result = codeMapService.getAnalyzedCodeMap(workspaceId, projectName, branchName);
+        // 💡 [수정] 4번째 인자로 language를 넘겨줍니다!
+        CodeMapResponse result = codeMapService.getAnalyzedCodeMap(workspaceId, projectName, branchName, language);
         return ResponseEntity.ok(result);
     }
 
