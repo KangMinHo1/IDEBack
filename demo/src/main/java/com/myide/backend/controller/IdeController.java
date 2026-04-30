@@ -36,12 +36,23 @@ public class IdeController {
     }
 
     @GetMapping("/{workspaceId}/files")
-    public ResponseEntity<FileNode> getFiles(@PathVariable String workspaceId, @RequestParam String projectName, @RequestParam(required = false, defaultValue = "main-repo") String branchName) {
+    public ResponseEntity<FileNode> getFiles(
+            @PathVariable String workspaceId,
+            @RequestParam String projectName,
+            // 💡 [수정됨] defaultValue를 "main-repo"에서 "master"로 변경했습니다!
+            @RequestParam(required = false, defaultValue = "master") String branchName
+    ) {
         return ResponseEntity.ok(fileService.getFileTree(workspaceId, projectName, branchName));
     }
 
     @GetMapping("/{workspaceId}/file")
-    public ResponseEntity<String> getFile(@PathVariable String workspaceId, @RequestParam String projectName, @RequestParam(required = false, defaultValue = "main-repo") String branchName, @RequestParam String path) {
+    public ResponseEntity<String> getFile(
+            @PathVariable String workspaceId,
+            @RequestParam String projectName,
+            // 💡 [수정됨] 여기도 파일 내용을 불러올 때 "master"를 기본으로 찾도록 변경했습니다!
+            @RequestParam(required = false, defaultValue = "master") String branchName,
+            @RequestParam String path
+    ) {
         return ResponseEntity.ok(fileService.getFileContent(workspaceId, projectName, branchName, path));
     }
 
