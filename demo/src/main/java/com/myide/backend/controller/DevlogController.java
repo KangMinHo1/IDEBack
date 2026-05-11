@@ -1,71 +1,70 @@
 package com.myide.backend.controller;
 
 import com.myide.backend.dto.devlog.DevlogCreateRequest;
-import com.myide.backend.dto.devlog.DevlogDetailResponse;
+import com.myide.backend.dto.devlog.DevlogResponse;
 import com.myide.backend.dto.devlog.DevlogUpdateRequest;
-import com.myide.backend.dto.devlog.WorkspaceDetailResponse;
-import com.myide.backend.dto.devlog.WorkspaceListItemResponse;
 import com.myide.backend.service.DevlogService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/devlogs")
 @RequiredArgsConstructor
+@RequestMapping("/api")
 public class DevlogController {
 
     private final DevlogService devlogService;
 
-    @GetMapping("/workspaces")
-    public List<WorkspaceListItemResponse> getMyWorkspaces(
-            @RequestParam(required = false) String q,
-            @RequestParam(defaultValue = "latest") String sort
-    ) {
-        return devlogService.getMyWorkspaces(q, sort);
-    }
-
-    @GetMapping("/workspaces/{workspaceId}")
-    public WorkspaceDetailResponse getWorkspaceDetail(
+    @GetMapping("/workspaces/{workspaceId}/devlogs")
+    public List<DevlogResponse> getDevlogs(
             @PathVariable String workspaceId,
-            @RequestParam(required = false) String q,
-            @RequestParam(defaultValue = "latest") String sort
+            @AuthenticationPrincipal Long userId
     ) {
-        return devlogService.getWorkspaceDetail(workspaceId, q, sort);
+        return devlogService.getDevlogs(workspaceId, userId);
     }
 
-    @GetMapping("/workspaces/{workspaceId}/projects/{projectId}/posts/{devlogId}")
-    public DevlogDetailResponse getDevlogDetail(
+    @PostMapping("/workspaces/{workspaceId}/devlogs")
+    public DevlogResponse createDevlog(
             @PathVariable String workspaceId,
-            @PathVariable Long projectId,
-            @PathVariable Long devlogId
+            @AuthenticationPrincipal Long userId,
+            @Valid @RequestBody DevlogCreateRequest request
     ) {
-        return devlogService.getDevlogDetail(workspaceId, projectId, devlogId);
+        return devlogService.createDevlog(workspaceId, userId, request);
     }
 
-    @PostMapping
-    public ResponseEntity<DevlogDetailResponse> create(@Valid @RequestBody DevlogCreateRequest request) {
-        return ResponseEntity.ok(devlogService.create(request));
+    @GetMapping("/devlogs/{devlogId}")
+    public DevlogResponse getDevlog(
+            @PathVariable String devlogId,
+            @AuthenticationPrincipal Long userId
+    ) {
+        return devlogService.getDevlog(devlogId, userId);
     }
 
-    @PutMapping("/{devlogId}")
-    public ResponseEntity<DevlogDetailResponse> update(
-            @PathVariable Long devlogId,
+    @PatchMapping("/devlogs/{devlogId}")
+    public DevlogResponse updateDevlog(
+            @PathVariable String devlogId,
+            @AuthenticationPrincipal Long userId,
             @Valid @RequestBody DevlogUpdateRequest request
     ) {
-        return ResponseEntity.ok(devlogService.update(devlogId, request));
+        return devlogService.updateDevlog(devlogId, userId, request);
     }
 
-    @DeleteMapping("/{devlogId}")
-    public ResponseEntity<Void> delete(
-            @PathVariable Long devlogId,
-            @RequestParam String workspaceId,
-            @RequestParam Long projectId
+    @DeleteMapping("/devlogs/{devlogId}")
+    public void deleteDevlog(
+            @PathVariable String devlogId,
+            @AuthenticationPrincipal Long userId
     ) {
-        devlogService.delete(workspaceId, projectId, devlogId);
-        return ResponseEntity.ok().build();
+        devlogService.deleteDevlog(devlogId, userId);
+    }
+
+    @GetMapping("/schedules/{scheduleId}/devlogs")
+    public List<DevlogResponse> getDevlogsBySchedule(
+            @PathVariable String scheduleId,
+            @AuthenticationPrincipal Long userId
+    ) {
+        return devlogService.getDevlogsBySchedule(scheduleId, userId);
     }
 }
