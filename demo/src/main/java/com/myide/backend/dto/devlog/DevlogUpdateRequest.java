@@ -2,39 +2,25 @@ package com.myide.backend.dto.devlog;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
-import lombok.Getter;
-import lombok.Setter;
 
 import java.time.LocalDate;
+import java.util.List;
 
-@Getter
-@Setter
-public class DevlogUpdateRequest {
+public record DevlogUpdateRequest(
+        // null 또는 빈 문자열이면 일반 개발일지로 변경
+        String scheduleId,
 
-    @NotBlank
-    private String workspaceId;
+        @NotBlank(message = "개발일지 제목은 필수입니다.")
+        String title,
 
-    @NotNull
-    private Long projectId;
+        @NotBlank(message = "개발일지 내용은 필수입니다.")
+        String content,
 
-    @NotBlank
-    private String title;
+        @NotNull(message = "작업한 날짜는 필수입니다.")
+        LocalDate workedDate,
 
-    @NotBlank
-    private String summary;
+        String category,
 
-    @NotBlank
-    private String content;
-
-    private String tagsText;
-    private LocalDate date;
-
-    private String stage;
-    private String goal;
-    private String design;
-    private String issue;
-    private String solution;
-    private String nextPlan;
-    private String commitHash;
-    private Integer progress;
+        List<String> tags
+) {
 }

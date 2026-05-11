@@ -1,337 +1,219 @@
 package com.myide.backend.service;
 
-import com.myide.backend.domain.Devlog;
-import com.myide.backend.domain.Project;
+import com.myide.backend.domain.User;
+import com.myide.backend.domain.devlog.Devlog;
+import com.myide.backend.domain.devlog.DevlogScheduleStatusAfterWrite;
+import com.myide.backend.domain.schedule.Schedule;
+import com.myide.backend.domain.schedule.ScheduleStatus;
 import com.myide.backend.domain.workspace.Workspace;
-import com.myide.backend.domain.workspace.WorkspaceType;
-import com.myide.backend.dto.devlog.*;
-import com.myide.backend.exception.ApiException;
+import com.myide.backend.dto.devlog.DevlogCreateRequest;
+import com.myide.backend.dto.devlog.DevlogResponse;
+import com.myide.backend.dto.devlog.DevlogUpdateRequest;
 import com.myide.backend.repository.DevlogRepository;
-import com.myide.backend.repository.ProjectRepository;
+import com.myide.backend.repository.ScheduleRepository;
+import com.myide.backend.repository.UserRepository;
 import com.myide.backend.repository.workspace.WorkspaceRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import java.util.Objects;
+import org.springframework.web.server.ResponseStatusException;
 
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.util.Arrays;
-import java.util.Comparator;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class DevlogService {
 
-    private final WorkspaceRepository workspaceRepository;
-    private final ProjectRepository projectRepository;
     private final DevlogRepository devlogRepository;
-    private final CurrentUserService currentUserService;
+    private final ScheduleRepository scheduleRepository;
+    private final WorkspaceRepository workspaceRepository;
+    private final UserRepository userRepository;
 
-    public List<WorkspaceListItemResponse> getMyWorkspaces(String q, String sort) {
-        Comparator<WorkspaceListItemResponse> comparator =
-                Comparator.comparing(WorkspaceListItemResponse::getLastUpdatedDate);
+    public List<DevlogResponse> getDevlogs(String workspaceId, Long userId) {
+        validateUserId(userId);
+        Workspace workspace = getAccessibleWorkspace(workspaceId, userId);
 
-        if (!isOldestSort(sort)) {
-            comparator = comparator.reversed();
-        }
-
-        Long userId = currentUserService.getCurrentUserId();
-
-        return workspaceRepository.findMyAllWorkspaces(userId).stream()
-                .map(workspace -> {
-                    List<Project> projects =
-                            projectRepository.findByWorkspaceUuidOrderByUpdatedAtDesc(workspace.getUuid());
-
-                    LocalDate lastUpdated = projects.stream()
-                            .map(Project::getUpdatedAt)
-                            .filter(java.util.Objects::nonNull)
-                            .map(LocalDateTime::toLocalDate)
-                            .max(LocalDate::compareTo)
-                            .orElse(
-                                    workspace.getUpdatedAt() != null
-                                            ? workspace.getUpdatedAt().toLocalDate()
-                                            : LocalDate.now()
-                            );
-
-                    int devlogCount = projects.stream()
-                            .mapToInt(project -> devlogRepository.findByProjectId(project.getId()).size())
-                            .sum();
-
-                    return WorkspaceListItemResponse.builder()
-                            .uuid(workspace.getUuid())
-                            .name(workspace.getName())
-                            .mode(workspace.getType() == WorkspaceType.TEAM ? "team" : "personal")
-                            .lastUpdatedDate(lastUpdated.toString())
-                            .devlogCount(devlogCount)
-                            .build();
-                })
-                .filter(item -> matchesWorkspace(item, q))
-                .sorted(comparator)
-                .toList();
-    }
-
-    public WorkspaceDetailResponse getWorkspaceDetail(String workspaceId, String q, String sort) {
-        Workspace workspace = getOwnedWorkspace(workspaceId);
-
-        List<ProjectDevlogGroupResponse> projectGroups = projectRepository
-                .findByWorkspaceUuidOrderByUpdatedAtDesc(workspaceId)
+        return devlogRepository
+                .findByWorkspace_UuidOrderByWorkedDateDescCreatedAtDesc(workspace.getUuid())
                 .stream()
-                .map(project -> toProjectGroup(project, q, sort))
+                .map(DevlogResponse::from)
                 .toList();
-
-        return WorkspaceDetailResponse.builder()
-                .uuid(workspace.getUuid())
-                .name(workspace.getName())
-                .mode(workspace.getType() == WorkspaceType.TEAM ? "team" : "personal")
-                .projects(projectGroups)
-                .build();
     }
 
-    public DevlogDetailResponse getDevlogDetail(String workspaceId, Long projectId, Long devlogId) {
-        Project project = getOwnedProject(workspaceId, projectId);
+    public DevlogResponse getDevlog(String devlogId, Long userId) {
+        validateUserId(userId);
 
-        Devlog devlog = devlogRepository.findByIdAndProjectId(devlogId, project.getId())
-                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "개발일지를 찾을 수 없습니다."));
+        Devlog devlog = getAccessibleDevlog(devlogId, userId);
 
-        return toDevlogDetail(workspaceId, projectId, devlog);
+        return DevlogResponse.from(devlog);
+    }
+
+    public List<DevlogResponse> getDevlogsBySchedule(String scheduleId, Long userId) {
+        validateUserId(userId);
+
+        Schedule schedule = getAccessibleSchedule(scheduleId, userId);
+
+        return devlogRepository
+                .findBySchedule_UuidOrderByWorkedDateDescCreatedAtDesc(schedule.getUuid())
+                .stream()
+                .map(DevlogResponse::from)
+                .toList();
     }
 
     @Transactional
-    public DevlogDetailResponse create(DevlogCreateRequest request) {
-        Workspace workspace = getOwnedWorkspace(request.getWorkspaceId());
-        Project project = getOwnedProject(request.getWorkspaceId(), request.getProjectId());
+    public DevlogResponse createDevlog(
+            String workspaceId,
+            Long userId,
+            DevlogCreateRequest request
+    ) {
+        validateUserId(userId);
+
+        Workspace workspace = getAccessibleWorkspace(workspaceId, userId);
+        User user = getUser(userId);
+
+        Schedule schedule = resolveSchedule(workspace.getUuid(), request.scheduleId());
 
         Devlog devlog = Devlog.builder()
-                .project(project)
-                .title(request.getTitle().trim())
-                .summary(request.getSummary().trim())
-                .content(request.getContent().trim())
-                .tags(normalizeTags(request.getTagsText()))
-                .date(request.getDate() != null ? request.getDate() : LocalDate.now())
-                .stage(
-                        request.getStage() != null && !request.getStage().isBlank()
-                                ? request.getStage().trim()
-                                : "implementation"
-                )
-                .goal(safeTrim(request.getGoal()))
-                .design(safeTrim(request.getDesign()))
-                .issue(safeTrim(request.getIssue()))
-                .solution(safeTrim(request.getSolution()))
-                .nextPlan(safeTrim(request.getNextPlan()))
-                .commitHash(safeTrim(request.getCommitHash()))
-                .progress(request.getProgress() != null ? request.getProgress() : 0)
+                .workspace(workspace)
+                .schedule(schedule)
+                .createdBy(user)
+                .title(request.title())
+                .content(request.content())
+                .workedDate(request.workedDate())
+                .category(request.category())
+                .tags(normalizeTags(request.tags(), schedule))
                 .build();
 
-        devlogRepository.save(devlog);
+        applyScheduleStatusAfterWrite(schedule, request.scheduleStatusAfterWrite());
 
-        LocalDateTime now = LocalDateTime.now();
-        project.setUpdatedAt(now);
-        workspace.setUpdatedAt(now);
+        Devlog saved = devlogRepository.save(devlog);
 
-        return toDevlogDetail(request.getWorkspaceId(), request.getProjectId(), devlog);
+        return DevlogResponse.from(saved);
     }
 
     @Transactional
-    public DevlogDetailResponse update(Long devlogId, DevlogUpdateRequest request) {
-        Workspace workspace = getOwnedWorkspace(request.getWorkspaceId());
-        Project project = getOwnedProject(request.getWorkspaceId(), request.getProjectId());
+    public DevlogResponse updateDevlog(
+            String devlogId,
+            Long userId,
+            DevlogUpdateRequest request
+    ) {
+        validateUserId(userId);
 
-        Devlog devlog = devlogRepository.findByIdAndProjectId(devlogId, project.getId())
-                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "개발일지를 찾을 수 없습니다."));
+        Devlog devlog = getAccessibleDevlog(devlogId, userId);
+        Workspace workspace = devlog.getWorkspace();
 
-        LocalDateTime now = LocalDateTime.now();
+        Schedule schedule = resolveSchedule(workspace.getUuid(), request.scheduleId());
 
-        devlog.setTitle(safeTrim(request.getTitle()));
-        devlog.setSummary(safeTrim(request.getSummary()));
-        devlog.setContent(safeTrim(request.getContent()));
-        devlog.setTags(normalizeTags(request.getTagsText()));
-        devlog.setDate(request.getDate() != null ? request.getDate() : devlog.getDate());
+        devlog.update(
+                schedule,
+                request.title(),
+                request.content(),
+                request.workedDate(),
+                request.category(),
+                normalizeTags(request.tags(), schedule)
+        );
 
-        String nextStage = safeTrim(request.getStage());
-        devlog.setStage(nextStage.isBlank() ? devlog.getStage() : nextStage);
-
-        devlog.setGoal(safeTrim(request.getGoal()));
-        devlog.setDesign(safeTrim(request.getDesign()));
-        devlog.setIssue(safeTrim(request.getIssue()));
-        devlog.setSolution(safeTrim(request.getSolution()));
-        devlog.setNextPlan(safeTrim(request.getNextPlan()));
-        devlog.setCommitHash(safeTrim(request.getCommitHash()));
-        devlog.setProgress(request.getProgress() != null ? request.getProgress() : 0);
-        devlog.setUpdatedAt(now);
-
-        project.setUpdatedAt(now);
-        workspace.setUpdatedAt(now);
-
-        return toDevlogDetail(request.getWorkspaceId(), request.getProjectId(), devlog);
+        return DevlogResponse.from(devlog);
     }
 
     @Transactional
-    public void delete(String workspaceId, Long projectId, Long devlogId) {
-        Workspace workspace = getOwnedWorkspace(workspaceId);
-        Project project = getOwnedProject(workspaceId, projectId);
+    public void deleteDevlog(String devlogId, Long userId) {
+        validateUserId(userId);
 
-        Devlog devlog = devlogRepository.findByIdAndProjectId(devlogId, project.getId())
-                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "개발일지를 찾을 수 없습니다."));
-
+        Devlog devlog = getAccessibleDevlog(devlogId, userId);
         devlogRepository.delete(devlog);
-
-        LocalDateTime now = LocalDateTime.now();
-        project.setUpdatedAt(now);
-        workspace.setUpdatedAt(now);
     }
 
-    private ProjectDevlogGroupResponse toProjectGroup(Project project, String q, String sort) {
-        Comparator<Devlog> comparator = Comparator.comparing(Devlog::getCreatedAt);
-
-        if (!isOldestSort(sort)) {
-            comparator = comparator.reversed();
+    private Schedule resolveSchedule(String workspaceId, String scheduleId) {
+        if (scheduleId == null || scheduleId.isBlank()) {
+            return null;
         }
 
-        List<DevlogItemResponse> posts = devlogRepository.findByProjectId(project.getId()).stream()
-                .filter(devlog -> matchesDevlog(devlog, q))
-                .sorted(comparator)
-                .map(this::toDevlogItem)
-                .toList();
-
-        return ProjectDevlogGroupResponse.builder()
-                .id(project.getId())
-                .name(project.getName())
-                .description(project.getDescription())
-                .language(project.getLanguage().name())
-                .lastUpdatedDate(
-                        project.getUpdatedAt() != null
-                                ? project.getUpdatedAt().toLocalDate().toString()
-                                : null
-                )
-                .devlogCount(posts.size())
-                .posts(posts)
-                .build();
+        return scheduleRepository.findByUuidAndWorkspace_Uuid(scheduleId, workspaceId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "연결할 일정을 찾을 수 없습니다."));
     }
 
-    private DevlogItemResponse toDevlogItem(Devlog devlog) {
-        return DevlogItemResponse.builder()
-                .id(devlog.getId())
-                .title(devlog.getTitle())
-                .date(devlog.getDate() != null ? devlog.getDate().toString() : null)
-                .summary(devlog.getSummary())
-                .content(devlog.getContent())
-                .tags(splitTags(devlog.getTags()))
-                .stage(devlog.getStage())
-                .goal(devlog.getGoal())
-                .design(devlog.getDesign())
-                .issue(devlog.getIssue())
-                .solution(devlog.getSolution())
-                .nextPlan(devlog.getNextPlan())
-                .commitHash(devlog.getCommitHash())
-                .progress(devlog.getProgress())
-                .build();
+    private void applyScheduleStatusAfterWrite(
+            Schedule schedule,
+            DevlogScheduleStatusAfterWrite statusAfterWrite
+    ) {
+        if (schedule == null) {
+            return;
+        }
+
+        DevlogScheduleStatusAfterWrite next =
+                statusAfterWrite == null ? DevlogScheduleStatusAfterWrite.NONE : statusAfterWrite;
+
+        if (next == DevlogScheduleStatusAfterWrite.PROGRESS) {
+            schedule.updateStatus(ScheduleStatus.PROGRESS);
+        }
+
+        if (next == DevlogScheduleStatusAfterWrite.DONE) {
+            schedule.updateStatus(ScheduleStatus.DONE);
+        }
     }
 
-    private DevlogDetailResponse toDevlogDetail(String workspaceId, Long projectId, Devlog devlog) {
-        return DevlogDetailResponse.builder()
-                .id(devlog.getId())
-                .workspaceId(workspaceId)
-                .projectId(projectId)
-                .title(devlog.getTitle())
-                .date(devlog.getDate() != null ? devlog.getDate().toString() : null)
-                .summary(devlog.getSummary())
-                .content(devlog.getContent())
-                .tags(splitTags(devlog.getTags()))
-                .stage(devlog.getStage())
-                .goal(devlog.getGoal())
-                .design(devlog.getDesign())
-                .issue(devlog.getIssue())
-                .solution(devlog.getSolution())
-                .nextPlan(devlog.getNextPlan())
-                .commitHash(devlog.getCommitHash())
-                .progress(devlog.getProgress())
-                .build();
+    private List<String> normalizeTags(List<String> tags, Schedule schedule) {
+        if (tags != null && !tags.isEmpty()) {
+            return tags.stream()
+                    .filter(tag -> tag != null && !tag.isBlank())
+                    .map(String::trim)
+                    .distinct()
+                    .toList();
+        }
+
+        List<String> defaultTags = new ArrayList<>();
+
+        if (schedule == null) {
+            defaultTags.add("General");
+            defaultTags.add("Memo");
+        } else {
+            defaultTags.add("Schedule");
+            defaultTags.add(schedule.getStatus().getValue());
+        }
+
+        return defaultTags;
     }
 
-    private Workspace getOwnedWorkspace(String workspaceId) {
-        Long userId = currentUserService.getCurrentUserId();
+    private Devlog getAccessibleDevlog(String devlogId, Long userId) {
+        Devlog devlog = devlogRepository.findByUuid(devlogId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "개발일지를 찾을 수 없습니다."));
+
+        getAccessibleWorkspace(devlog.getWorkspace().getUuid(), userId);
+
+        return devlog;
+    }
+
+    private Schedule getAccessibleSchedule(String scheduleId, Long userId) {
+        Schedule schedule = scheduleRepository.findByUuid(scheduleId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "일정을 찾을 수 없습니다."));
+
+        getAccessibleWorkspace(schedule.getWorkspace().getUuid(), userId);
+
+        return schedule;
+    }
+
+    private Workspace getAccessibleWorkspace(String workspaceId, Long userId) {
+        validateUserId(userId);
 
         return workspaceRepository.findByUuidAndOwner_Id(workspaceId, userId)
-                .orElseThrow(() -> new ApiException(
-                        HttpStatus.NOT_FOUND,
-                        "워크스페이스를 찾을 수 없거나 접근 권한이 없습니다."
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.FORBIDDEN,
+                        "워크스페이스 접근 권한이 없습니다."
                 ));
     }
 
-    private Project getOwnedProject(String workspaceId, Long projectId) {
-        getOwnedWorkspace(workspaceId);
-
-        return projectRepository.findByIdAndWorkspaceUuid(projectId, workspaceId)
-                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "프로젝트를 찾을 수 없습니다."));
+    private User getUser(Long userId) {
+        return userRepository.findById(userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "사용자를 찾을 수 없습니다."));
     }
 
-    private boolean matchesWorkspace(WorkspaceListItemResponse item, String q) {
-        if (q == null || q.isBlank()) {
-            return true;
+    private void validateUserId(Long userId) {
+        if (userId == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "로그인이 필요합니다.");
         }
-
-        String keyword = q.toLowerCase(Locale.ROOT);
-        return containsIgnoreCase(item.getName(), keyword);
-    }
-
-    private boolean matchesDevlog(Devlog devlog, String q) {
-        if (q == null || q.isBlank()) {
-            return true;
-        }
-
-        String keyword = q.toLowerCase(Locale.ROOT);
-
-        return containsIgnoreCase(devlog.getTitle(), keyword)
-                || containsIgnoreCase(devlog.getSummary(), keyword)
-                || containsIgnoreCase(devlog.getContent(), keyword)
-                || containsIgnoreCase(devlog.getTags(), keyword)
-                || containsIgnoreCase(devlog.getGoal(), keyword)
-                || containsIgnoreCase(devlog.getDesign(), keyword)
-                || containsIgnoreCase(devlog.getIssue(), keyword)
-                || containsIgnoreCase(devlog.getSolution(), keyword)
-                || containsIgnoreCase(devlog.getNextPlan(), keyword)
-                || containsIgnoreCase(devlog.getCommitHash(), keyword)
-                || containsIgnoreCase(devlog.getStage(), keyword);
-    }
-
-    private boolean containsIgnoreCase(String source, String keyword) {
-        return source != null && source.toLowerCase(Locale.ROOT).contains(keyword);
-    }
-
-    private boolean isOldestSort(String sort) {
-        return "oldest".equalsIgnoreCase(sort);
-    }
-
-    private String normalizeTags(String tagsText) {
-        if (tagsText == null || tagsText.isBlank()) {
-            return "";
-        }
-
-        return Arrays.stream(tagsText.split(","))
-                .map(String::trim)
-                .filter(tag -> !tag.isBlank())
-                .distinct()
-                .collect(Collectors.joining(","));
-    }
-
-    private List<String> splitTags(String tags) {
-        if (tags == null || tags.isBlank()) {
-            return List.of();
-        }
-
-        return Arrays.stream(tags.split(","))
-                .map(String::trim)
-                .filter(tag -> !tag.isBlank())
-                .toList();
-    }
-
-    private String safeTrim(String value) {
-        return value == null ? "" : value.trim();
     }
 }
