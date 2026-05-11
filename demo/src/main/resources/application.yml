@@ -46,3 +46,7 @@ jwt:
   secret: aW52YWxpZC1zZWNyZXQta2V5LXRlc3QtdmFsdWUtZm9yLWNhcHN0b25lLXByb2plY3Q=
   expiration: 86400000 # 24시간 (밀리초)
 
+github:
+  client:
+    id: "Ov23liQgkCewWgdjOoGD"
+    secret: "a168ef8f0a5ac4c8f9e909fb8ff49a4decf5cb11"

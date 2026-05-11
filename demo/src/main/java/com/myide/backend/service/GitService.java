@@ -198,7 +198,8 @@ public class GitService {
         }
     }
 
-    public void pull(Path targetPath, String token) {
+    // 💡 [수정] Pull 시 발생하는 병합 커밋에 로그인한 유저의 정보를 강제로 넣습니다.
+    public void pull(Path targetPath, String token, String authorName, String authorEmail) {
         try {
             String remoteUrl = executeGitCommand(targetPath, "git", "config", "--get", "remote.origin.url").trim();
             if (remoteUrl.isEmpty()) throw new RuntimeException("원격 저장소가 연동되어 있지 않습니다.");
@@ -210,17 +211,17 @@ public class GitService {
 
             String currentBranch = executeGitCommand(targetPath, "git", "rev-parse", "--abbrev-ref", "HEAD").trim();
             log.info("📥 Pulling branch '{}' from remote...", currentBranch);
-            executeGitCommand(targetPath, "git", "pull", pullUrl, currentBranch);
+
+            // 🚀 [핵심 마법] 작성자 이름(user.name)과 이메일(user.email)을 명령어에 함께 태워서 보냅니다.
+            executeGitCommand(targetPath, "git", "-c", "user.name=" + authorName, "-c", "user.email=" + authorEmail, "pull", pullUrl, currentBranch, "--allow-unrelated-histories");
+
             log.info("✅ Pull Completed Successfully!");
         } catch (Exception e) {
             log.error("Git Pull Failed", e);
-            throw new RuntimeException("Pull 실패 (충돌 발생 또는 토큰 권한 문제): " + e.getMessage());
+            throw new RuntimeException("Pull 실패 (충돌 발생 또는 권한 문제): " + e.getMessage());
         }
     }
 
-    // =========================================================================
-    // 💡 [수정] 충돌 발생 여부를 boolean으로 반환하도록 변경 (true: 성공, false: 충돌)
-    // =========================================================================
     public boolean merge(Path repoPath, String targetBranch) {
         try {
             String output = executeGitCommand(repoPath, "git", "merge", targetBranch);
@@ -263,8 +264,16 @@ public class GitService {
         }
     }
 
+    // 💡 [수정] 로그를 읽기 전에 깃허브 원격 서버 상태를 먼저 확인(Fetch)합니다.
     public List<Map<String, String>> getHistory(Path repoPath) {
         try {
+            // 🚀 [핵심 마법] 원격 서버의 최신 정보(origin/master)를 긁어옵니다.
+            try {
+                executeGitCommand(repoPath, "git", "fetch", "origin");
+            } catch (Exception e) {
+                log.warn("Fetch 실패 (아직 원격에 연결되지 않았거나 통신 오류). 무시하고 로컬 정보만 보여줍니다.");
+            }
+
             String output = executeGitCommand(repoPath, "git", "log", "master", "--all", "--graph", "--topo-order", "--date-order", "--color=never", "--pretty=format:|*|%h|*|%an|*|%ad|*|%s|*|%d", "--date=short");
             List<Map<String, String>> history = new ArrayList<>();
 
@@ -299,14 +308,12 @@ public class GitService {
         }
     }
 
-    // 💡 [최종 수정] 윈도우의 읽기 전용(Read-Only) 파일까지 강제로 부수고 삭제하는 불도저 로직!
     public void deleteBranch(Path masterRepoPath, Path worktreePath, String branchName) {
         try {
             if ("master".equalsIgnoreCase(branchName)) {
                 throw new IllegalArgumentException("master 브랜치는 삭제할 수 없습니다.");
             }
 
-            // 1. 워크트리 제거 명령 (정상적인 워크트리일 경우)
             try {
                 executeGitCommand(masterRepoPath, "git", "worktree", "remove", "-f", worktreePath.toAbsolutePath().toString());
                 log.info("🗑️ Worktree Folder Deleted: {}", worktreePath);
@@ -314,16 +321,14 @@ public class GitService {
                 log.warn("Git worktree remove 실패 (찌꺼기 폴더일 가능성 높음). 강제 삭제 진입...");
             }
 
-            // 2. 🚨 [핵심] 윈도우 Read-Only 파일 무시하고 강제로 폴더 삭제
             if (Files.exists(worktreePath)) {
                 try (java.util.stream.Stream<Path> walk = Files.walk(worktreePath)) {
                     walk.sorted(java.util.Comparator.reverseOrder())
                             .forEach(p -> {
                                 try {
-                                    p.toFile().setWritable(true); // 읽기 전용 해제 (Windows Git 폴더 삭제의 핵심!)
+                                    p.toFile().setWritable(true);
                                     Files.delete(p);
                                 } catch (Exception ignored) {
-                                    // 삭제 실패해도 무시하고 다음 파일 진행
                                 }
                             });
                 } catch (Exception e) {
@@ -331,7 +336,6 @@ public class GitService {
                 }
             }
 
-            // 3. 브랜치 기록 삭제
             try {
                 executeGitCommand(masterRepoPath, "git", "branch", "-D", branchName);
                 log.info("🗑️ Git Branch Deleted: {}", branchName);
