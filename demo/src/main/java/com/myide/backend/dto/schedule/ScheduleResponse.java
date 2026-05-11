@@ -1,51 +1,36 @@
 package com.myide.backend.dto.schedule;
 
-import com.myide.backend.domain.Schedule;
-import lombok.Builder;
-import lombok.Getter;
+import com.myide.backend.domain.schedule.Schedule;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 
-@Getter
-@Builder
-public class ScheduleResponse {
-
-    private Long id;
-    private String type;
-    private String workspaceId;
-    private String workspaceName;
-    private Long creatorId;
-    private String creatorName;
-
-    private String title;
-    private LocalDate startDate;
-    private LocalDate endDate;
-    private String category;
-    private String location;
-    private String stage;
-    private String role;
-    private String status;
-    private String participants;
-    private String description;
-
-    public static ScheduleResponse from(Schedule schedule) {
-        return ScheduleResponse.builder()
-                .id(schedule.getId())
-                .type(schedule.getType().name())
-                .workspaceId(schedule.getWorkspace() != null ? schedule.getWorkspace().getUuid() : null)
-                .workspaceName(schedule.getWorkspace() != null ? schedule.getWorkspace().getName() : null)
-                .creatorId(schedule.getCreator().getId())
-                .creatorName(schedule.getCreator().getNickname())
-                .title(schedule.getTitle())
-                .startDate(schedule.getStartDate())
-                .endDate(schedule.getEndDate())
-                .category(schedule.getCategory().name())
-                .location(schedule.getLocation())
-                .stage(schedule.getStage().name())
-                .role(schedule.getRole().name())
-                .status(schedule.getStatus().name())
-                .participants(schedule.getParticipants())
-                .description(schedule.getDescription())
-                .build();
+public record ScheduleResponse(
+        String id,
+        String workspaceId,
+        String projectName,
+        String title,
+        String description,
+        LocalDate startDate,
+        LocalDate endDate,
+        String status,
+        boolean hasDevlog,
+        LocalDateTime createdAt,
+        LocalDateTime updatedAt
+) {
+    public static ScheduleResponse from(Schedule schedule, boolean hasDevlog) {
+        return new ScheduleResponse(
+                schedule.getUuid(),
+                schedule.getWorkspace().getUuid(),
+                schedule.getWorkspace().getName(),
+                schedule.getTitle(),
+                schedule.getDescription(),
+                schedule.getStartDate(),
+                schedule.getEndDate(),
+                schedule.getStatus().getValue(),
+                hasDevlog,
+                schedule.getCreatedAt(),
+                schedule.getUpdatedAt()
+        );
     }
 }
