@@ -1,118 +1,76 @@
 package com.myide.backend.controller;
 
 import com.myide.backend.dto.schedule.ScheduleCreateRequest;
-import com.myide.backend.dto.schedule.ScheduleProgressResponse;
+import com.myide.backend.dto.schedule.SchedulePeriodUpdateRequest;
 import com.myide.backend.dto.schedule.ScheduleResponse;
-import com.myide.backend.dto.schedule.ScheduleSummaryResponse;
-import com.myide.backend.dto.schedule.ScheduleTeamMemberResponse;
-import com.myide.backend.dto.schedule.ScheduleUpdateRequest;
-import com.myide.backend.dto.schedule.ScheduleWorkspaceOptionResponse;
+import com.myide.backend.dto.schedule.ScheduleStatusUpdateRequest;
 import com.myide.backend.service.ScheduleService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/schedules")
 @RequiredArgsConstructor
+@RequestMapping("/api")
 public class ScheduleController {
 
     private final ScheduleService scheduleService;
 
-    @PostMapping
-    public ScheduleResponse createSchedule(@RequestBody @Valid ScheduleCreateRequest request) {
-        return scheduleService.createSchedule(request);
-    }
-
-    @GetMapping("/calendar")
-    public List<ScheduleResponse> getSchedulesForMonth(
-            @RequestParam String view,
-            @RequestParam int year,
-            @RequestParam int month,
-            @RequestParam(required = false) String workspaceId
+    @GetMapping("/workspaces/{workspaceId}/schedules")
+    public List<ScheduleResponse> getSchedules(
+            @PathVariable String workspaceId,
+            @AuthenticationPrincipal Long userId,
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+            LocalDate startDate,
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+            LocalDate endDate
     ) {
-        return scheduleService.getSchedulesForMonth(view, year, month, workspaceId);
+        if (startDate != null && endDate != null) {
+            return scheduleService.getSchedulesInRange(workspaceId, userId, startDate, endDate);
+        }
+
+        return scheduleService.getSchedules(workspaceId, userId);
     }
 
-    @GetMapping("/weekly")
-    public List<ScheduleResponse> getSchedulesForWeek(
-            @RequestParam String view,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
-            @RequestParam(required = false) String workspaceId
+    @PostMapping("/workspaces/{workspaceId}/schedules")
+    public ScheduleResponse createSchedule(
+            @PathVariable String workspaceId,
+            @AuthenticationPrincipal Long userId,
+            @Valid @RequestBody ScheduleCreateRequest request
     ) {
-        return scheduleService.getSchedulesForWeek(view, date, workspaceId);
+        return scheduleService.createSchedule(workspaceId, userId, request);
     }
 
-    @GetMapping("/latest")
-    public List<ScheduleResponse> getLatestSchedules(
-            @RequestParam String view,
-            @RequestParam String workspaceId,
-            @RequestParam(defaultValue = "3") int size
+    @PatchMapping("/schedules/{scheduleId}/status")
+    public ScheduleResponse updateStatus(
+            @PathVariable String scheduleId,
+            @AuthenticationPrincipal Long userId,
+            @Valid @RequestBody ScheduleStatusUpdateRequest request
     ) {
-        return scheduleService.getLatestSchedules(view, workspaceId, size);
+        return scheduleService.updateStatus(scheduleId, userId, request);
     }
 
-    @GetMapping("/summary")
-    public ScheduleSummaryResponse getSummary(
-            @RequestParam String view,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
-            @RequestParam(required = false) String workspaceId
+    @PatchMapping("/schedules/{scheduleId}/period")
+    public ScheduleResponse updatePeriod(
+            @PathVariable String scheduleId,
+            @AuthenticationPrincipal Long userId,
+            @Valid @RequestBody SchedulePeriodUpdateRequest request
     ) {
-        return scheduleService.getSummary(view, date, workspaceId);
+        return scheduleService.updatePeriod(scheduleId, userId, request);
     }
 
-    @GetMapping("/progress")
-    public ScheduleProgressResponse getProgress(
-            @RequestParam String view,
-            @RequestParam String workspaceId
+    @DeleteMapping("/schedules/{scheduleId}")
+    public void deleteSchedule(
+            @PathVariable String scheduleId,
+            @AuthenticationPrincipal Long userId
     ) {
-        return scheduleService.getProgress(view, workspaceId);
-    }
-
-    @GetMapping("/personal/workspaces")
-    public List<ScheduleWorkspaceOptionResponse> getMyPersonalWorkspaces() {
-        return scheduleService.getMyPersonalWorkspaces();
-    }
-
-    @GetMapping("/team/workspaces")
-    public List<ScheduleWorkspaceOptionResponse> getMyTeamWorkspaces() {
-        return scheduleService.getMyTeamWorkspaces();
-    }
-
-    @GetMapping("/team/workspaces/{workspaceId}/members")
-    public List<ScheduleTeamMemberResponse> getWorkspaceMembers(@PathVariable String workspaceId) {
-        return scheduleService.getWorkspaceMembers(workspaceId);
-    }
-
-    @GetMapping
-    public List<ScheduleResponse> getSchedulesByDate(
-            @RequestParam String view,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
-            @RequestParam(required = false) String workspaceId,
-            @RequestParam(required = false, defaultValue = "all") String category
-    ) {
-        return scheduleService.getSchedulesByDate(view, date, workspaceId, category);
-    }
-
-    @GetMapping("/{scheduleId:\\d+}")
-    public ScheduleResponse getScheduleDetail(@PathVariable Long scheduleId) {
-        return scheduleService.getScheduleDetail(scheduleId);
-    }
-
-    @PutMapping("/{scheduleId:\\d+}")
-    public ScheduleResponse updateSchedule(
-            @PathVariable Long scheduleId,
-            @RequestBody @Valid ScheduleUpdateRequest request
-    ) {
-        return scheduleService.updateSchedule(scheduleId, request);
-    }
-
-    @DeleteMapping("/{scheduleId:\\d+}")
-    public void deleteSchedule(@PathVariable Long scheduleId) {
-        scheduleService.deleteSchedule(scheduleId);
+        scheduleService.deleteSchedule(scheduleId, userId);
     }
 }

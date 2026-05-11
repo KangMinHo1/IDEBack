@@ -10,6 +10,7 @@ import com.myide.backend.dto.ide.FileRequest;
 import com.myide.backend.repository.ProjectRepository;
 import com.myide.backend.repository.workspace.WorkspaceRepository;
 import com.myide.backend.service.template.ProjectTemplateStrategy;
+import com.myide.backend.dto.project.ProjectListResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -33,6 +34,24 @@ public class ProjectService {
     private final GitService gitService;
     private final List<ProjectTemplateStrategy> templateStrategies;
 
+
+    public List<ProjectListResponse> getProjectsByWorkspace(String workspaceId) {
+        List<Project> projects =
+                projectRepository.findByWorkspaceUuidOrderByUpdatedAtDesc(workspaceId);
+
+        return projects.stream()
+                .map(project -> ProjectListResponse.builder()
+                        .id(project.getId())
+                        .name(project.getName())
+                        .description(project.getDescription())
+                        .language(project.getLanguage())
+                        .gitUrl(project.getGitUrl())
+                        .updatedAt(project.getUpdatedAt())
+                        .workspaceId(project.getWorkspace().getUuid())
+                        .workspaceName(project.getWorkspace().getName())
+                        .build())
+                .toList();
+    }
     @Transactional(readOnly = true)
     public FileNode getProjectList(String workspaceId) {
         Workspace workspace = workspaceRepository.findById(workspaceId)
@@ -160,4 +179,5 @@ public class ProjectService {
         }
         return branches;
     }
+
 }
