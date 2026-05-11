@@ -1,68 +1,25 @@
 package com.myide.backend.repository;
 
-import com.myide.backend.domain.Schedule;
-import com.myide.backend.domain.Schedule.ScheduleCategory;
-import com.myide.backend.domain.Schedule.ScheduleStatus;
-import com.myide.backend.domain.Schedule.ScheduleType;
-import org.springframework.data.domain.Pageable;
+import com.myide.backend.domain.schedule.Schedule;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 
 public interface ScheduleRepository extends JpaRepository<Schedule, Long> {
 
-    List<Schedule> findByTypeAndWorkspace_UuidAndStartDateLessThanEqualAndEndDateGreaterThanEqual(
-            ScheduleType type,
+    Optional<Schedule> findByUuid(String uuid);
+
+    Optional<Schedule> findByUuidAndWorkspace_Uuid(String uuid, String workspaceUuid);
+
+    List<Schedule> findByWorkspace_UuidOrderByStartDateAscCreatedAtDesc(String workspaceUuid);
+
+    List<Schedule> findByWorkspace_UuidAndStartDateLessThanEqualAndEndDateGreaterThanEqualOrderByStartDateAscCreatedAtDesc(
             String workspaceUuid,
             LocalDate rangeEnd,
             LocalDate rangeStart
     );
 
-    List<Schedule> findByTypeAndWorkspace_UuidAndStartDateLessThanEqualAndEndDateGreaterThanEqualOrderByStartDateAscIdDesc(
-            ScheduleType type,
-            String workspaceUuid,
-            LocalDate rangeEnd,
-            LocalDate rangeStart
-    );
-
-    List<Schedule> findByTypeAndWorkspace_UuidAndCategoryAndStartDateLessThanEqualAndEndDateGreaterThanEqualOrderByStartDateAscIdDesc(
-            ScheduleType type,
-            String workspaceUuid,
-            ScheduleCategory category,
-            LocalDate rangeEnd,
-            LocalDate rangeStart
-    );
-
-    long countByTypeAndWorkspace_UuidAndStartDateLessThanEqualAndEndDateGreaterThanEqual(
-            ScheduleType type,
-            String workspaceUuid,
-            LocalDate rangeEnd,
-            LocalDate rangeStart
-    );
-
-    long countByTypeAndWorkspace_UuidAndStartDateLessThanEqualAndEndDateGreaterThanEqualAndCategory(
-            ScheduleType type,
-            String workspaceUuid,
-            LocalDate rangeEnd,
-            LocalDate rangeStart,
-            ScheduleCategory category
-    );
-
-    long countByTypeAndWorkspace_Uuid(
-            ScheduleType type,
-            String workspaceUuid
-    );
-
-    long countByTypeAndWorkspace_UuidAndStatus(
-            ScheduleType type,
-            String workspaceUuid,
-            ScheduleStatus status
-    );
-
-    List<Schedule> findByTypeAndWorkspace_UuidOrderByStartDateDescIdDesc(
-            ScheduleType type,
-            String workspaceUuid,
-            Pageable pageable
-    );
+    boolean existsByUuidAndWorkspace_Uuid(String uuid, String workspaceUuid);
 }

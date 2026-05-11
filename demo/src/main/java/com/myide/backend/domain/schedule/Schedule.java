@@ -19,6 +19,7 @@ public class Schedule {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    // 프론트와 API에서 사용할 공개 식별자
     @Column(nullable = false, unique = true, updatable = false, length = 36)
     private String uuid;
 
@@ -46,6 +47,9 @@ public class Schedule {
     @Column(nullable = false, length = 20)
     private ScheduleStatus status;
 
+    @Column(nullable = false, length = 50)
+    private String category;
+
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
@@ -60,7 +64,8 @@ public class Schedule {
             String description,
             LocalDate startDate,
             LocalDate endDate,
-            ScheduleStatus status
+            ScheduleStatus status,
+            String category
     ) {
         this.uuid = UUID.randomUUID().toString();
         this.workspace = workspace;
@@ -70,6 +75,7 @@ public class Schedule {
         this.startDate = startDate;
         this.endDate = endDate;
         this.status = status == null ? ScheduleStatus.TODO : status;
+        this.category = category == null || category.isBlank() ? "General" : category;
     }
 
     public void updateStatus(ScheduleStatus status) {
@@ -86,13 +92,15 @@ public class Schedule {
             String description,
             LocalDate startDate,
             LocalDate endDate,
-            ScheduleStatus status
+            ScheduleStatus status,
+            String category
     ) {
         this.title = title;
         this.description = description;
         this.startDate = startDate;
         this.endDate = endDate;
         this.status = status;
+        this.category = category == null || category.isBlank() ? "General" : category;
     }
 
     @PrePersist
