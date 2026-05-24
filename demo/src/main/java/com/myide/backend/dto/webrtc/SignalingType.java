@@ -2,9 +2,28 @@ package com.myide.backend.dto.webrtc;
 
 public enum SignalingType {
     JOIN,
+    LEAVE,
+
+    ROOM_USERS,
+    USER_JOINED,
+    USER_LEFT,
+
     OFFER,
     ANSWER,
     ICE,
-    LEAVE,
-    SPEAKING   // 💡 [NEW] 누가 말하고 있는지 알려주는 상태 타입 추가!
+
+    MUTE,
+    UNMUTE,
+
+    CHANNELS,
+    CREATE_CHANNEL,
+    CHANNEL_CREATED,
+
+    UPDATE_CHANNEL,
+    CHANNEL_UPDATED,
+
+    DELETE_CHANNEL,
+    CHANNEL_DELETED,
+
+    ERROR
 }

@@ -23,6 +23,7 @@ public class CreateRelationRequest {
     private String targetNode;
 
     @NotBlank(message = "관계 타입은 필수입니다.")
-    @Pattern(regexp = "^(?i)(EXTENDS|IMPLEMENTS|COMPOSITION|IMPORT)$", message = "올바른 관계 타입을 지정해주세요.")
+    // 💡 [핵심 수정] 정규식 허용 목록에 'INJECTS' 추가
+    @Pattern(regexp = "^(?i)(EXTENDS|IMPLEMENTS|COMPOSITION|IMPORT|INJECTS)$", message = "올바른 관계 타입을 지정해주세요.")
     private String relationType;
 }
