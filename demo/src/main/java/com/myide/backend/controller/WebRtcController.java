@@ -56,7 +56,6 @@ public class WebRtcController {
         }
 
         /*
-         * 중요:
          * 프론트에서 보낸 senderId는 신뢰하지 않습니다.
          * JWT에서 검증된 userId로 강제 덮어씁니다.
          */
@@ -65,17 +64,24 @@ public class WebRtcController {
         message.setSenderId(authenticatedUserId);
 
         log.info(
-                "[WebRTC] workspaceId={}, channelId={}, type={}, authenticatedSenderId={}, claimedSenderId={}, receiverId={}",
+                "[WebRTC] received type={}, workspaceId={}, channelId={}, authenticatedSenderId={}, claimedSenderId={}, receiverId={}",
+                message.getType(),
                 workspaceId,
                 channelId,
-                message.getType(),
                 authenticatedUserId,
                 claimedSenderId,
                 message.getReceiverId()
         );
 
         switch (message.getType()) {
-            case CHANNELS -> handleChannels(workspaceId, message);
+            case CHANNELS -> handleChannels(workspaceId, channelId, message);
+
+            /*
+             * 프론트가 음성 모달을 열거나 채널을 클릭할 때
+             * 현재 채널 참여자 목록을 요청합니다.
+             * 기존 코드에는 이 case가 없어서 Unsupported signaling type 에러가 발생했습니다.
+             */
+            case ROOM_USERS -> handleRoomUsers(workspaceId, channelId, message);
 
             case CREATE_CHANNEL -> handleCreateChannel(workspaceId, message);
 
@@ -93,27 +99,87 @@ public class WebRtcController {
 
             case UNMUTE -> handleMuteChanged(workspaceId, channelId, message, false);
 
+            /*
+             * 아래 타입들은 서버가 클라이언트에게 내려주는 이벤트입니다.
+             * 클라이언트가 실수로 보내도 에러 폭주를 만들지 않도록 무시합니다.
+             */
+            case USER_JOINED,
+                 USER_LEFT,
+                 CHANNEL_CREATED,
+                 CHANNEL_UPDATED,
+                 CHANNEL_DELETED,
+                 ERROR -> log.debug(
+                    "[WebRTC] Server-only event ignored. type={}, workspaceId={}, channelId={}, senderId={}",
+                    message.getType(),
+                    workspaceId,
+                    channelId,
+                    message.getSenderId()
+            );
+
             default -> sendError(
                     workspaceId,
                     channelId,
                     message.getSenderId(),
-                    "Unsupported signaling type."
+                    "Unsupported signaling type: " + message.getType()
             );
         }
     }
 
-    private void handleChannels(String workspaceId, WebRtcMessage message) {
+    private void handleChannels(
+            String workspaceId,
+            String channelId,
+            WebRtcMessage message
+    ) {
         List<VoiceChannel> channels = voiceChannelService.getChannels(workspaceId);
 
         WebRtcMessage response = WebRtcMessage.builder()
                 .type(SignalingType.CHANNELS)
                 .workspaceId(workspaceId)
-                .channelId(normalizeChannelId(message.getChannelId()))
+                .channelId(channelId)
                 .receiverId(message.getSenderId())
                 .channels(channels)
                 .build();
 
         broadcast(workspaceId, response);
+    }
+
+    private void handleRoomUsers(
+            String workspaceId,
+            String channelId,
+            WebRtcMessage message
+    ) {
+        if (!voiceChannelService.existsChannel(workspaceId, channelId)) {
+            sendError(
+                    workspaceId,
+                    channelId,
+                    message.getSenderId(),
+                    "Voice channel does not exist."
+            );
+            return;
+        }
+
+        List<VoiceParticipant> participants =
+                voiceRoomRegistry.getParticipants(workspaceId, channelId);
+
+        WebRtcMessage response = WebRtcMessage.builder()
+                .type(SignalingType.ROOM_USERS)
+                .workspaceId(workspaceId)
+                .channelId(channelId)
+                .senderId(message.getSenderId())
+                .receiverId(message.getSenderId())
+                .participants(participants)
+                .channels(voiceChannelService.getChannels(workspaceId))
+                .build();
+
+        broadcast(workspaceId, response);
+
+        log.info(
+                "[WebRTC] ROOM_USERS workspaceId={}, channelId={}, receiverId={}, participantCount={}",
+                workspaceId,
+                channelId,
+                message.getSenderId(),
+                participants.size()
+        );
     }
 
     private void handleCreateChannel(String workspaceId, WebRtcMessage message) {
@@ -298,8 +364,16 @@ public class WebRtcController {
                     .build();
 
             broadcast(previousLeaveEvent.getWorkspaceId(), userLeftMessage);
+
+            broadcastRoomUsers(
+                    previousLeaveEvent.getWorkspaceId(),
+                    previousLeaveEvent.getChannelId()
+            );
         }
 
+        /*
+         * JOIN한 본인에게 현재 방 사용자 목록을 내려줍니다.
+         */
         WebRtcMessage roomUsersMessage = WebRtcMessage.builder()
                 .type(SignalingType.ROOM_USERS)
                 .workspaceId(workspaceId)
@@ -312,6 +386,10 @@ public class WebRtcController {
 
         broadcast(workspaceId, roomUsersMessage);
 
+        /*
+         * 기존 참여자들에게 새 사용자가 들어왔음을 알립니다.
+         * 기존 참여자가 이 이벤트를 받고 OFFER를 생성합니다.
+         */
         WebRtcMessage userJoinedMessage = WebRtcMessage.builder()
                 .type(SignalingType.USER_JOINED)
                 .workspaceId(workspaceId)
@@ -322,6 +400,20 @@ public class WebRtcController {
                 .build();
 
         broadcast(workspaceId, userJoinedMessage);
+
+        /*
+         * 채널 목록만 보고 있는 사용자도 인원 수와 참여자 목록이 갱신되도록
+         * 현재 방 상태를 전체 broadcast합니다.
+         */
+        broadcastRoomUsers(workspaceId, channelId);
+
+        log.info(
+                "[WebRTC] JOIN workspaceId={}, channelId={}, userId={}, participantCount={}",
+                workspaceId,
+                channelId,
+                message.getSenderId(),
+                joinResult.getParticipants().size()
+        );
     }
 
     private void handleLeave(
@@ -346,6 +438,18 @@ public class WebRtcController {
                             .build();
 
                     broadcast(leaveEvent.getWorkspaceId(), userLeftMessage);
+
+                    broadcastRoomUsers(
+                            leaveEvent.getWorkspaceId(),
+                            leaveEvent.getChannelId()
+                    );
+
+                    log.info(
+                            "[WebRTC] LEAVE workspaceId={}, channelId={}, userId={}",
+                            leaveEvent.getWorkspaceId(),
+                            leaveEvent.getChannelId(),
+                            leaveEvent.getParticipant().getUserId()
+                    );
                 });
     }
 
@@ -394,6 +498,15 @@ public class WebRtcController {
             return;
         }
 
+        log.info(
+                "[WebRTC] relay type={}, workspaceId={}, channelId={}, senderId={}, receiverId={}",
+                message.getType(),
+                workspaceId,
+                channelId,
+                message.getSenderId(),
+                message.getReceiverId()
+        );
+
         broadcast(workspaceId, message);
     }
 
@@ -420,7 +533,23 @@ public class WebRtcController {
                             .build();
 
                     broadcast(workspaceId, muteMessage);
+                    broadcastRoomUsers(workspaceId, channelId);
                 });
+    }
+
+    private void broadcastRoomUsers(String workspaceId, String channelId) {
+        List<VoiceParticipant> participants =
+                voiceRoomRegistry.getParticipants(workspaceId, channelId);
+
+        WebRtcMessage stateMessage = WebRtcMessage.builder()
+                .type(SignalingType.ROOM_USERS)
+                .workspaceId(workspaceId)
+                .channelId(channelId)
+                .participants(participants)
+                .channels(voiceChannelService.getChannels(workspaceId))
+                .build();
+
+        broadcast(workspaceId, stateMessage);
     }
 
     private Long resolveAuthenticatedUserId(SimpMessageHeaderAccessor headerAccessor) {

@@ -40,16 +40,24 @@ public class SecurityConfig {
                 )
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+
                         .requestMatchers(
                                 "/api/auth/login",
+                                "/api/auth/register",
                                 "/api/auth/refresh",
                                 "/api/auth/logout",
                                 "/ws/**"
                         ).permitAll()
 
                         /*
-                         * 프론트 인증 통합 전까지는 유지합니다.
-                         * 통합 완료 후 아래 줄을 .anyRequest().authenticated() 로 바꾸면 됩니다.
+                         * GitHub access token은 현재 로그인한 User DB에 저장해야 하므로
+                         * 반드시 Access Token 인증이 필요합니다.
+                         */
+                        .requestMatchers("/api/github/link").authenticated()
+
+                        /*
+                         * 현재 프로젝트가 전체 API 인증 통합 전이면 임시로 유지합니다.
+                         * 최종 안정화 단계에서는 아래를 authenticated()로 바꾸는 것이 맞습니다.
                          */
                         .anyRequest().permitAll()
                 )

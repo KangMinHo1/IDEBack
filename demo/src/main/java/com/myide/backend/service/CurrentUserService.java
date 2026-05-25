@@ -40,8 +40,8 @@ public class CurrentUserService {
         }
 
         try {
-            if (!jwtProvider.validateToken(token)) {
-                throw new ApiException(HttpStatus.UNAUTHORIZED, "유효하지 않거나 만료된 토큰입니다.");
+            if (!jwtProvider.validateAccessToken(token)) {
+                throw new ApiException(HttpStatus.UNAUTHORIZED, "유효하지 않거나 만료된 Access Token입니다.");
             }
 
             Long userId = jwtProvider.getUserIdFromToken(token);
@@ -54,7 +54,7 @@ public class CurrentUserService {
         } catch (ApiException e) {
             throw e;
         } catch (JwtException e) {
-            throw new ApiException(HttpStatus.UNAUTHORIZED, "유효하지 않거나 만료된 토큰입니다.");
+            throw new ApiException(HttpStatus.UNAUTHORIZED, "유효하지 않거나 만료된 Access Token입니다.");
         } catch (Exception e) {
             throw new ApiException(HttpStatus.UNAUTHORIZED, "토큰 처리 중 오류가 발생했습니다.");
         }
