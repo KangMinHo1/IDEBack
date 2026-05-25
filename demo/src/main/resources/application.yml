@@ -43,8 +43,15 @@ spring:
       workspace-path: ./temp-workspace
 
 jwt:
-  secret: aW52YWxpZC1zZWNyZXQta2V5LXRlc3QtdmFsdWUtZm9yLWNhcHN0b25lLXByb2plY3Q=
-  expiration: 86400000 # 24시간 (밀리초)
+  secret: ${JWT_SECRET:aW52YWxpZC1zZWNyZXQta2V5LXRlc3QtdmFsdWUtZm9yLWNhcHN0b25lLXByb2plY3Q=}
+  access-token-expiration-ms: 900000        # 15분
+  refresh-token-expiration-ms: 1209600000   # 14일
+
+auth:
+  refresh-cookie:
+    name: refreshToken
+    secure: false
+    same-site: Lax
 
 github:
   client:

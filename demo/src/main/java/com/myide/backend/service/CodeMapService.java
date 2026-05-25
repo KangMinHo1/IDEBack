@@ -16,7 +16,7 @@ import com.myide.backend.dto.codemap.CodeMapResponse;
 import com.myide.backend.dto.codemap.CodeGenerateRequest;
 import com.myide.backend.repository.codemap.CodeMapCacheRepository;
 import com.myide.backend.repository.codemap.CodeSummaryRepository;
-import com.myide.backend.service.analyzer.CodeAnalyzer; // 💡 [추가] 다국어 분석기 인터페이스
+import com.myide.backend.service.analyzer.CodeAnalyzer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -42,15 +42,8 @@ public class CodeMapService {
     private final WorkspaceService workspaceService;
     private final CodeMapCacheRepository codeMapCacheRepository;
     private final ObjectMapper objectMapper;
-
-    // 💡 [변경] JavaAnalyzer 1개가 아니라, 구현된 모든 분석기를 리스트로 주입받습니다!
     private final List<CodeAnalyzer> analyzers;
 
-    // =========================================================================
-    // 💡 [아키텍처 핵심] 코드맵 분석 및 DB 캐싱 (DTO 역직렬화 정석 버전)
-    // =========================================================================
-
-    // 💡 Controller에서 넘어오는 language 파라미터가 없을 때를 대비한 오버로딩
     @Transactional
     public CodeMapResponse getAnalyzedCodeMap(String workspaceId, String projectName, String branchName) {
         return getAnalyzedCodeMap(workspaceId, projectName, branchName, "JAVA");
@@ -75,8 +68,6 @@ public class CodeMapService {
         }
 
         log.info("🐢 [CodeMap] 캐시 미스! {} 언어 파일 파싱을 시작합니다.", safeLanguage);
-
-        // 💡 언어에 맞는 분석기 실행
         CodeMapResponse analyzedData = doAnalyzeWorkspace(workspaceId, projectName, safeBranch, safeLanguage);
 
         try {
@@ -105,7 +96,7 @@ public class CodeMapService {
     @Transactional
     public void invalidateCache(String workspaceId, String projectName, String branchName) {
         String safeBranch = branchName == null ? "master" : branchName;
-        log.info("🗑️ [CodeMap] 파일 변경 감지! DB 캐시를 무효화(삭제)합니다. (Project: {})", projectName);
+        log.info("🗑️ [CodeMap] 파일 변경 감지! DB 캐시 무효화 (Project: {})", projectName);
         codeMapCacheRepository.deleteByWorkspaceIdAndProjectNameAndBranchName(workspaceId, projectName, safeBranch);
     }
 
@@ -120,35 +111,43 @@ public class CodeMapService {
         return selectedAnalyzer.analyze(projectPath.toString());
     }
 
-    // =========================================================================
-    // 💡 시각적 스캐폴딩 (파일 및 관계 조작 로직)
-    // =========================================================================
-
     @Transactional
     public void createComponent(CreateComponentRequest req) {
         Path branchPath = workspaceService.getProjectPath(req.getWorkspaceId(), req.getProjectName(), req.getBranchName());
+        String rawName = req.getName();
+        String pureClassName = rawName;
+        String packagePath = "";
+
+        if (rawName.contains("/")) {
+            int lastSlashIndex = rawName.lastIndexOf('/');
+            pureClassName = rawName.substring(lastSlashIndex + 1);
+            String dirPath = rawName.substring(0, lastSlashIndex);
+            if (dirPath.contains("src/main/java/")) {
+                packagePath = dirPath.replace("src/main/java/", "").replace("/", ".");
+            }
+        }
 
         String ext = ".java";
         String boilerplateCode = "";
 
-        // 💡 [수정됨] 템플릿 타입에 따라 확장자와 뼈대 코드를 다르게 생성합니다!
         if ("REACT_COMPONENT".equals(req.getType())) {
             ext = ".jsx";
-            boilerplateCode = "import React from 'react';\n\nexport default function " + req.getName() + "() {\n    return (\n        <div className=\"p-4\">\n            <h1>" + req.getName() + " Component</h1>\n        </div>\n    );\n}\n";
+            boilerplateCode = "import React from 'react';\n\nexport default function " + pureClassName + "() {\n    return (\n        <div className=\"p-4\">\n            <h1>" + pureClassName + " Component</h1>\n        </div>\n    );\n}\n";
         } else if ("PYTHON_CLASS".equals(req.getType())) {
             ext = ".py";
-            boilerplateCode = "class " + req.getName() + ":\n    def __init__(self):\n        pass\n";
+            boilerplateCode = "class " + pureClassName + ":\n    def __init__(self):\n        pass\n";
         } else {
-            boilerplateCode = generateJavaBoilerplate(req.getName(), req.getType());
+            boilerplateCode = generateJavaBoilerplate(pureClassName, req.getType(), packagePath);
         }
 
-        Path filePath = branchPath.resolve(req.getName() + ext);
+        Path filePath = branchPath.resolve(rawName + ext);
 
         if (Files.exists(filePath)) {
-            throw new RuntimeException("이미 존재하는 컴포넌트입니다: " + req.getName() + ext);
+            throw new RuntimeException("이미 존재하는 컴포넌트입니다: " + rawName + ext);
         }
 
         try {
+            Files.createDirectories(filePath.getParent());
             Files.writeString(filePath, boilerplateCode, StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
             invalidateCache(req.getWorkspaceId(), req.getProjectName(), req.getBranchName());
         } catch (IOException e) {
@@ -156,8 +155,11 @@ public class CodeMapService {
         }
     }
 
-    private String generateJavaBoilerplate(String className, String type) {
+    private String generateJavaBoilerplate(String className, String type, String packageName) {
         StringBuilder code = new StringBuilder();
+        if (packageName != null && !packageName.trim().isEmpty()) {
+            code.append("package ").append(packageName).append(";\n\n");
+        }
         switch (type.toUpperCase()) {
             case "INTERFACE":
                 code.append("public interface ").append(className).append(" {\n}\n");
@@ -178,19 +180,17 @@ public class CodeMapService {
         return code.toString();
     }
 
-    // 💡 [추가됨] JavaParser가 .jsx나 .py를 파싱하다가 서버가 터지는 것을 막는 방어 코드!
     private void checkValidJavaFile(String fileName) {
         if (fileName.endsWith(".js") || fileName.endsWith(".jsx") || fileName.endsWith(".py") || fileName.endsWith(".ts")) {
-            throw new RuntimeException("🚨 자동 코드 주입 기능은 현재 Java 환경에서만 완벽 지원됩니다. (React/Python 구문 분석기는 탑재 예정입니다.)");
+            throw new RuntimeException("🚨 자동 코드 주입 기능은 현재 Java 환경에서만 완벽 지원됩니다.");
         }
     }
 
     @Transactional
     public void createRelation(CreateRelationRequest req) {
         String sourceFileName = req.getSourceNode();
-        if (!sourceFileName.contains(".")) sourceFileName += ".java"; // 확장자가 안 넘어올 경우 대비
-
-        checkValidJavaFile(sourceFileName); // 💡 [방어 코드 적용]
+        if (!sourceFileName.contains(".")) sourceFileName += ".java";
+        checkValidJavaFile(sourceFileName);
 
         String targetPath = req.getTargetNode();
         Path projectPath = workspaceService.getProjectPath(req.getWorkspaceId(), req.getProjectName(), req.getBranchName());
@@ -200,11 +200,26 @@ public class CodeMapService {
         if (!Files.exists(sourcePath)) throw new RuntimeException("Source 파일을 찾을 수 없습니다.");
 
         try {
-            CompilationUnit cu = StaticJavaParser.parse(sourcePath);
-            String pureTargetClassName = targetFileFullPath.getFileName().toString().replace(".java", "");
+            CompilationUnit cuSource = StaticJavaParser.parse(sourcePath);
 
-            String targetFqcn = pureTargetClassName;
-            if (Files.exists(targetFileFullPath)) {
+            // 💡 단방향 주입 로직 실행
+            injectUnidirectionalRelation(cuSource, targetFileFullPath, req.getRelationType());
+
+            Files.writeString(sourcePath, cuSource.toString(), StandardCharsets.UTF_8);
+            invalidateCache(req.getWorkspaceId(), req.getProjectName(), req.getBranchName());
+
+        } catch (Exception e) {
+            throw new RuntimeException("관계 생성 중 오류: " + e.getMessage());
+        }
+    }
+
+    // 💡 [핵심 수정] DI, Extends, Implements AST 조작 로직 방어적 개선
+    private void injectUnidirectionalRelation(CompilationUnit cu, Path targetFileFullPath, String relationType) {
+        String pureTargetClassName = targetFileFullPath.getFileName().toString().replace(".java", "");
+        String targetFqcn = pureTargetClassName;
+
+        if (Files.exists(targetFileFullPath)) {
+            try {
                 CompilationUnit targetCu = StaticJavaParser.parse(targetFileFullPath);
                 String packageName = targetCu.getPackageDeclaration()
                         .map(pd -> pd.getNameAsString())
@@ -212,42 +227,63 @@ public class CodeMapService {
                 if (!packageName.isEmpty()) {
                     targetFqcn = packageName + "." + pureTargetClassName;
                 }
+            } catch (IOException e) {
+                throw new RuntimeException("대상 파일 분석 실패", e);
             }
+        }
 
-            final String finalFqcn = targetFqcn;
-            boolean importExists = cu.getImports().stream()
-                    .anyMatch(i -> i.getNameAsString().equals(finalFqcn));
+        final String finalFqcn = targetFqcn;
+        boolean importExists = cu.getImports().stream()
+                .anyMatch(i -> i.getNameAsString().equals(finalFqcn));
 
-            if (!importExists) {
-                cu.addImport(finalFqcn);
-                log.info("➕ [CodeMap] 정확한 패키지 경로로 Import 추가: {}", finalFqcn);
-            }
+        if (!importExists) {
+            cu.addImport(finalFqcn);
+        }
 
-            TypeDeclaration<?> typeDecl = cu.getPrimaryType().orElse(cu.getTypes().isEmpty() ? null : cu.getType(0));
-            if (typeDecl != null && typeDecl.isClassOrInterfaceDeclaration()) {
-                ClassOrInterfaceDeclaration classDecl = typeDecl.asClassOrInterfaceDeclaration();
+        TypeDeclaration<?> typeDecl = cu.getPrimaryType().orElse(cu.getTypes().isEmpty() ? null : cu.getType(0));
+        if (typeDecl != null && typeDecl.isClassOrInterfaceDeclaration()) {
+            ClassOrInterfaceDeclaration classDecl = typeDecl.asClassOrInterfaceDeclaration();
+            String fieldName = Character.toLowerCase(pureTargetClassName.charAt(0)) + pureTargetClassName.substring(1);
 
-                switch (req.getRelationType().toUpperCase()) {
-                    case "EXTENDS":
+            switch (relationType.toUpperCase()) {
+                case "EXTENDS":
+                    // 다중 상속 금지 방어
+                    if (classDecl.getExtendedTypes().isEmpty()) {
                         classDecl.addExtendedType(pureTargetClassName);
-                        break;
-                    case "IMPLEMENTS":
+                    } else {
+                        throw new IllegalStateException("이미 다른 클래스를 상속받고 있습니다.");
+                    }
+                    break;
+
+                case "IMPLEMENTS":
+                    boolean alreadyImplemented = classDecl.getImplementedTypes().stream()
+                            .anyMatch(type -> type.getNameAsString().equals(pureTargetClassName));
+                    if (!alreadyImplemented) {
                         classDecl.addImplementedType(pureTargetClassName);
-                        break;
-                    case "COMPOSITION":
-                        String fieldName = Character.toLowerCase(pureTargetClassName.charAt(0)) + pureTargetClassName.substring(1);
-                        if (classDecl.getFieldByName(fieldName).isEmpty()) {
-                            classDecl.addField(pureTargetClassName, fieldName, Modifier.Keyword.PRIVATE);
-                        }
-                        break;
-                }
+                    }
+                    break;
+
+                case "INJECTS":
+                    // 1. Lombok @RequiredArgsConstructor 주입
+                    if (cu.getImports().stream().noneMatch(i -> i.getNameAsString().equals("lombok.RequiredArgsConstructor"))) {
+                        cu.addImport("lombok.RequiredArgsConstructor");
+                    }
+                    if (!classDecl.getAnnotationByName("RequiredArgsConstructor").isPresent()) {
+                        classDecl.addAnnotation("RequiredArgsConstructor");
+                    }
+                    // 2. private final 의존성 주입 필드 생성
+                    if (classDecl.getFieldByName(fieldName).isEmpty()) {
+                        classDecl.addField(pureTargetClassName, fieldName, Modifier.Keyword.PRIVATE, Modifier.Keyword.FINAL);
+                    }
+                    break;
+
+                case "COMPOSITION":
+                    // 일반 객체 참조
+                    if (classDecl.getFieldByName(fieldName).isEmpty()) {
+                        classDecl.addField(pureTargetClassName, fieldName, Modifier.Keyword.PRIVATE);
+                    }
+                    break;
             }
-
-            Files.writeString(sourcePath, cu.toString(), StandardCharsets.UTF_8);
-            invalidateCache(req.getWorkspaceId(), req.getProjectName(), req.getBranchName());
-
-        } catch (Exception e) {
-            throw new RuntimeException("관계 생성 중 오류: " + e.getMessage());
         }
     }
 
@@ -256,7 +292,7 @@ public class CodeMapService {
         String sourceFileName = req.getSourceNode();
         if (!sourceFileName.contains(".")) sourceFileName += ".java";
 
-        checkValidJavaFile(sourceFileName); // 💡 [방어 코드 적용]
+        checkValidJavaFile(sourceFileName);
 
         String rawTarget = req.getTargetNode().replace(".java", "");
         if (rawTarget.contains("/")) {
@@ -321,17 +357,14 @@ public class CodeMapService {
         }
     }
 
-    // =========================================================================
-    // 💡 [업그레이드] 멤버 변수 / 멤버 메서드 동적 생성 로직 (값, 파라미터, 바디 지원)
-    // =========================================================================
     @Transactional
     public void generateCodeComponent(CodeGenerateRequest req) {
         try {
             Path projectPath = workspaceService.getProjectPath(req.getWorkspaceId(), req.getProjectName(), req.getBranchName());
-            String fileName = req.getClassName();
+            String fileName = req.getFilePath();
             if (!fileName.contains(".")) fileName += ".java";
 
-            checkValidJavaFile(fileName); // 💡 [방어 코드 적용]
+            checkValidJavaFile(fileName);
 
             Path targetFile = projectPath.resolve(fileName);
 
@@ -340,9 +373,15 @@ public class CodeMapService {
             }
 
             CompilationUnit cu = StaticJavaParser.parse(targetFile);
-            String pureClassName = req.getClassName().replace(".java", "");
+
+            String pureClassName = req.getClassName();
+            if (pureClassName.contains("/")) {
+                pureClassName = pureClassName.substring(pureClassName.lastIndexOf('/') + 1);
+            }
+            pureClassName = pureClassName.replace(".java", "");
+
             ClassOrInterfaceDeclaration targetClass = cu.getClassByName(pureClassName)
-                    .orElseThrow(() -> new IllegalArgumentException("파일 내부에 클래스가 존재하지 않습니다: " + pureClassName));
+                    .orElseThrow(() -> new IllegalArgumentException("파일 내부에 클래스가 존재하지 않습니다: " + req.getClassName() + " -> " + req.getFilePath()));
 
             Modifier.Keyword modifier = Modifier.Keyword.valueOf(req.getAccessModifier().toUpperCase());
 
@@ -353,8 +392,20 @@ public class CodeMapService {
 
                 FieldDeclaration field = targetClass.addField(req.getDataType(), req.getName(), modifier);
 
+                // 💡 [핵심 수정] 초기값 문자열 및 문자 리터럴 보정
                 if (req.getInitialValue() != null && !req.getInitialValue().trim().isEmpty()) {
-                    field.getVariable(0).setInitializer(req.getInitialValue());
+                    String val = req.getInitialValue().trim();
+                    String dataTypeLower = req.getDataType().trim().toLowerCase();
+
+                    // String 일 때 쌍따옴표가 없으면 강제 추가
+                    if (dataTypeLower.equals("string") && !val.startsWith("\"") && !val.endsWith("\"")) {
+                        val = "\"" + val + "\"";
+                    }
+                    // Char 일 때 홑따옴표가 없으면 강제 추가
+                    else if ((dataTypeLower.equals("char") || dataTypeLower.equals("character")) && !val.startsWith("'") && !val.endsWith("'")) {
+                        val = "'" + val + "'";
+                    }
+                    field.getVariable(0).setInitializer(val);
                 }
                 log.info("✅ [CodeMap] 변수 추가 완료: {} {} {}", req.getAccessModifier(), req.getDataType(), req.getName());
 
@@ -395,11 +446,6 @@ public class CodeMapService {
             throw new RuntimeException("코드 주입 실패: " + e.getMessage(), e);
         }
     }
-
-
-    // =========================================================================
-    // 💡 AI 요약 관련 로직
-    // =========================================================================
 
     @Transactional
     public String getOrGenerateSummary(String workspaceId, String projectName, String branchName, String filePath) {

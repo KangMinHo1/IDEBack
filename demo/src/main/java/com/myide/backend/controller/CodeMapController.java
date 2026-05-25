@@ -3,7 +3,7 @@ package com.myide.backend.controller;
 import com.myide.backend.dto.codemap.CreateComponentRequest;
 import com.myide.backend.dto.codemap.CreateRelationRequest;
 import com.myide.backend.dto.codemap.CodeMapResponse;
-import com.myide.backend.dto.codemap.CodeGenerateRequest; // 💡 새로 추가된 DTO 임포트
+import com.myide.backend.dto.codemap.CodeGenerateRequest;
 import com.myide.backend.service.CodeMapService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -25,7 +25,6 @@ public class CodeMapController {
             @RequestParam(required = false, defaultValue = "master") String branchName,
             @RequestParam(required = false, defaultValue = "JAVA") String language) {
 
-        // 💡 [수정] 4번째 인자로 language를 넘겨줍니다!
         CodeMapResponse result = codeMapService.getAnalyzedCodeMap(workspaceId, projectName, branchName, language);
         return ResponseEntity.ok(result);
     }
@@ -69,7 +68,6 @@ public class CodeMapController {
         }
     }
 
-    // 💡 [NEW] 클래스 내부에 변수/메서드 생성 API
     @PostMapping("/generate")
     public ResponseEntity<String> generateCodeComponent(@RequestBody @Valid CodeGenerateRequest request) {
         try {

@@ -4,6 +4,7 @@ import com.myide.backend.dto.ide.BuildRequest;
 import com.myide.backend.dto.ide.FileNode;
 import com.myide.backend.dto.ide.FileRequest;
 import com.myide.backend.dto.project.CreateProjectRequest;
+import com.myide.backend.handler.WorkspaceEventWebSocketHandler;
 import com.myide.backend.service.BuildService;
 import com.myide.backend.service.FileService;
 import com.myide.backend.service.ProjectService;
@@ -23,12 +24,19 @@ import java.nio.file.Paths;
 @RestController
 @RequestMapping("/api/workspaces")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "http://localhost:5173", allowCredentials = "true", exposedHeaders = "Content-Disposition")
+@CrossOrigin(
+        origins = "http://localhost:5173",
+        allowCredentials = "true",
+        exposedHeaders = "Content-Disposition"
+)
 public class IdeController {
 
     private final ProjectService projectService;
     private final FileService fileService;
     private final BuildService buildService;
+
+    // 파일 트리 변경 이벤트 WebSocket broadcast 용도
+    private final WorkspaceEventWebSocketHandler workspaceEventWebSocketHandler;
 
     @GetMapping("/{workspaceId}/projects")
     public ResponseEntity<FileNode> getProjects(@PathVariable String workspaceId) {
@@ -39,7 +47,6 @@ public class IdeController {
     public ResponseEntity<FileNode> getFiles(
             @PathVariable String workspaceId,
             @RequestParam String projectName,
-            // 💡 [수정됨] defaultValue를 "main-repo"에서 "master"로 변경했습니다!
             @RequestParam(required = false, defaultValue = "master") String branchName
     ) {
         return ResponseEntity.ok(fileService.getFileTree(workspaceId, projectName, branchName));
@@ -49,7 +56,6 @@ public class IdeController {
     public ResponseEntity<String> getFile(
             @PathVariable String workspaceId,
             @RequestParam String projectName,
-            // 💡 [수정됨] 여기도 파일 내용을 불러올 때 "master"를 기본으로 찾도록 변경했습니다!
             @RequestParam(required = false, defaultValue = "master") String branchName,
             @RequestParam String path
     ) {
@@ -65,6 +71,10 @@ public class IdeController {
     @PostMapping("/files")
     public ResponseEntity<String> createFile(@RequestBody @Valid FileRequest request) {
         fileService.createFile(request);
+
+        // 파일 생성 후 같은 workspace/project/branch 방에 접속 중인 사용자들에게 알림
+        workspaceEventWebSocketHandler.broadcastFileTreeChanged(request, "CREATE");
+
         return ResponseEntity.ok("생성됨");
     }
 
@@ -77,12 +87,20 @@ public class IdeController {
     @DeleteMapping("/files")
     public ResponseEntity<String> deleteFile(@RequestBody @Valid FileRequest request) {
         fileService.deleteFile(request);
+
+        // 파일 삭제 후 같은 workspace/project/branch 방에 접속 중인 사용자들에게 알림
+        workspaceEventWebSocketHandler.broadcastFileTreeChanged(request, "DELETE");
+
         return ResponseEntity.ok("삭제됨");
     }
 
     @PutMapping("/files/rename")
     public ResponseEntity<String> renameFile(@RequestBody @Valid FileRequest request) {
         fileService.renameFile(request);
+
+        // 파일명 변경 후 같은 workspace/project/branch 방에 접속 중인 사용자들에게 알림
+        workspaceEventWebSocketHandler.broadcastFileTreeChanged(request, "RENAME");
+
         return ResponseEntity.ok("변경됨");
     }
 
@@ -92,11 +110,21 @@ public class IdeController {
             String builtFilePath = buildService.buildProject(request);
             Path path = Paths.get(builtFilePath);
             Resource resource = new UrlResource(path.toUri());
-            if (!resource.exists()) throw new RuntimeException("빌드 파일 없음");
+
+            if (!resource.exists()) {
+                throw new RuntimeException("빌드 파일 없음");
+            }
+
             return ResponseEntity.ok()
                     .contentType(MediaType.APPLICATION_OCTET_STREAM)
-                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + resource.getFilename() + "\"")
+                    .header(
+                            HttpHeaders.CONTENT_DISPOSITION,
+                            "attachment; filename=\"" + resource.getFilename() + "\""
+                    )
                     .body(resource);
-        } catch (MalformedURLException e) { throw new RuntimeException("경로 오류"); }
+
+        } catch (MalformedURLException e) {
+            throw new RuntimeException("경로 오류", e);
+        }
     }
 }
