@@ -4,6 +4,7 @@ import com.myide.backend.dto.schedule.ScheduleCreateRequest;
 import com.myide.backend.dto.schedule.SchedulePeriodUpdateRequest;
 import com.myide.backend.dto.schedule.ScheduleResponse;
 import com.myide.backend.dto.schedule.ScheduleStatusUpdateRequest;
+import com.myide.backend.dto.schedule.ScheduleUpdateRequest;
 import com.myide.backend.service.ScheduleService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -46,6 +47,15 @@ public class ScheduleController {
             @Valid @RequestBody ScheduleCreateRequest request
     ) {
         return scheduleService.createSchedule(workspaceId, userId, request);
+    }
+
+    @PutMapping("/schedules/{scheduleId}")
+    public ScheduleResponse updateSchedule(
+            @PathVariable String scheduleId,
+            @AuthenticationPrincipal Long userId,
+            @Valid @RequestBody ScheduleUpdateRequest request
+    ) {
+        return scheduleService.updateSchedule(scheduleId, userId, request);
     }
 
     @PatchMapping("/schedules/{scheduleId}/status")

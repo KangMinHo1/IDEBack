@@ -7,6 +7,7 @@ import com.myide.backend.dto.schedule.ScheduleCreateRequest;
 import com.myide.backend.dto.schedule.SchedulePeriodUpdateRequest;
 import com.myide.backend.dto.schedule.ScheduleResponse;
 import com.myide.backend.dto.schedule.ScheduleStatusUpdateRequest;
+import com.myide.backend.dto.schedule.ScheduleUpdateRequest;
 import com.myide.backend.repository.DevlogRepository;
 import com.myide.backend.repository.ScheduleRepository;
 import com.myide.backend.repository.UserRepository;
@@ -78,6 +79,7 @@ public class ScheduleService {
             ScheduleCreateRequest request
     ) {
         validateUserId(userId);
+        validateTitle(request.title());
         validatePeriod(request.startDate(), request.endDate());
 
         Workspace workspace = getAccessibleWorkspace(workspaceId, userId);
@@ -86,17 +88,46 @@ public class ScheduleService {
         Schedule schedule = Schedule.builder()
                 .workspace(workspace)
                 .createdBy(user)
-                .title(request.title())
-                .description(request.description())
+                .title(request.title().trim())
+                .description(normalizeDescription(request.description()))
                 .startDate(request.startDate())
                 .endDate(request.endDate())
                 .status(request.status())
-
                 .build();
 
         Schedule saved = scheduleRepository.save(schedule);
 
         return ScheduleResponse.from(saved, false);
+    }
+
+    @Transactional
+    public ScheduleResponse updateSchedule(
+            String scheduleId,
+            Long userId,
+            ScheduleUpdateRequest request
+    ) {
+        validateUserId(userId);
+        validateTitle(request.title());
+        validatePeriod(request.startDate(), request.endDate());
+
+        if (request.status() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "상태는 필수입니다.");
+        }
+
+        Schedule schedule = getAccessibleSchedule(scheduleId, userId);
+        schedule.updateContent(
+                request.title().trim(),
+                normalizeDescription(request.description()),
+                request.startDate(),
+                request.endDate(),
+                request.status(),
+                schedule.getCategory()
+        );
+
+        return ScheduleResponse.from(
+                schedule,
+                devlogRepository.existsBySchedule_Uuid(schedule.getUuid())
+        );
     }
 
     @Transactional
@@ -170,6 +201,12 @@ public class ScheduleService {
         }
     }
 
+    private void validateTitle(String title) {
+        if (title == null || title.trim().isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "일정 제목은 필수입니다.");
+        }
+    }
+
     private void validatePeriod(LocalDate startDate, LocalDate endDate) {
         if (startDate == null || endDate == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "시작일과 종료일은 필수입니다.");
@@ -178,5 +215,13 @@ public class ScheduleService {
         if (endDate.isBefore(startDate)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "종료일은 시작일보다 빠를 수 없습니다.");
         }
+    }
+
+    private String normalizeDescription(String description) {
+        if (description == null || description.trim().isEmpty()) {
+            return "등록된 상세 내용이 없습니다.";
+        }
+
+        return description.trim();
     }
 }
