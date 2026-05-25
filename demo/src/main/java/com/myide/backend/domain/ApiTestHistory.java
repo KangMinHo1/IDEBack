@@ -7,8 +7,10 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "api_test_history")
-@Getter @Setter
-@NoArgsConstructor @AllArgsConstructor
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
 @Builder
 public class ApiTestHistory {
 
@@ -23,13 +25,23 @@ public class ApiTestHistory {
     private String url;
 
     private Integer status;
+
     private Boolean success;
+
     private Long durationMs;
+
+    @Lob
+    @Column(columnDefinition = "LONGTEXT")
+    private String responseBody;
 
     private LocalDateTime createdAt;
 
     @PrePersist
     void onCreate() {
         this.createdAt = LocalDateTime.now();
+
+        if (this.success == null && this.status != null) {
+            this.success = this.status >= 200 && this.status < 400;
+        }
     }
 }

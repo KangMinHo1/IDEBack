@@ -21,12 +21,20 @@ public class ApiHistoryService {
     }
 
     public HistoryResponse create(HistoryRequest req) {
+        Integer status = req.getStatus();
+
+        Boolean success = req.getSuccess();
+        if (success == null && status != null) {
+            success = status >= 200 && status < 400;
+        }
+
         ApiTestHistory e = ApiTestHistory.builder()
                 .method(req.getMethod())
                 .url(req.getUrl())
-                .status(req.getStatus())
-                .success(req.getSuccess() != null ? req.getSuccess() : (req.getStatus() != null && req.getStatus() < 400))
+                .status(status)
+                .success(success)
                 .durationMs(req.getDurationMs())
+                .responseBody(req.getResponseBody())
                 .build();
 
         ApiTestHistory saved = repo.save(e);
@@ -34,7 +42,8 @@ public class ApiHistoryService {
     }
 
     public List<HistoryResponse> list(int limit) {
-        int l = Math.max(1, Math.min(limit, 50)); // 1~50 제한
+        int l = Math.max(1, Math.min(limit, 50));
+
         return repo.findTop50ByOrderByIdDesc().stream()
                 .limit(l)
                 .map(this::toResponse)
@@ -49,6 +58,7 @@ public class ApiHistoryService {
                 .status(e.getStatus())
                 .success(e.getSuccess())
                 .durationMs(e.getDurationMs())
+                .responseBody(e.getResponseBody())
                 .createdAt(e.getCreatedAt() == null ? null : e.getCreatedAt().format(ISO))
                 .build();
     }

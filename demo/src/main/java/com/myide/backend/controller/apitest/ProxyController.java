@@ -8,7 +8,7 @@ import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api")
-public class ProxyController {
+public class  ProxyController {
 
     private final ProxyService proxyService;
 

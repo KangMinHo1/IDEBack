@@ -2,8 +2,10 @@ package com.myide.backend.dto.apitest;
 
 import lombok.*;
 
-@Getter @Setter
-@NoArgsConstructor @AllArgsConstructor
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
 @Builder
 public class HistoryRequest {
     private String method;
@@ -11,4 +13,6 @@ public class HistoryRequest {
     private Integer status;
     private Boolean success;
     private Long durationMs;
+
+    private String responseBody;
 }
