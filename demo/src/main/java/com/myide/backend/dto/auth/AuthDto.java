@@ -1,28 +1,85 @@
 package com.myide.backend.dto.auth;
 
+import com.myide.backend.domain.User;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import lombok.*;
 
 public class AuthDto {
 
-    @Data
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class LoginRequest {
-        @NotBlank(message = "이메일은 필수입니다.")
-        @Email(message = "이메일 형식이 올바르지 않습니다.")
+
+        @Email
+        @NotBlank
         private String email;
 
-        @NotBlank(message = "비밀번호는 필수입니다.")
+        @NotBlank
         private String password;
     }
 
-    @Data
-    @AllArgsConstructor
+    @Getter
+    @Builder
     @NoArgsConstructor
+    @AllArgsConstructor
+    public static class UserSummary {
+        private Long id;
+        private String email;
+        private String nickname;
+        private String profileImageUrl;
+
+        public static UserSummary from(User user) {
+            return UserSummary.builder()
+                    .id(user.getId())
+                    .email(user.getEmail())
+                    .nickname(user.getNickname())
+                    .profileImageUrl(user.getProfileImageUrl())
+                    .build();
+        }
+    }
+
+    /*
+     * 프론트 호환성을 위해 token 필드도 같이 내려줍니다.
+     * 신규 프론트에서는 accessToken을 사용하세요.
+     */
+    @Getter
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class TokenResponse {
         private String accessToken;
-        private Long userId; // 프론트에서 로컬스토리지에 저장하기 편하도록 같이 내려줍니다.
+        private String token;
+        private Long userId;
+        private UserSummary user;
+
+        public static TokenResponse of(String accessToken, User user) {
+            return TokenResponse.builder()
+                    .accessToken(accessToken)
+                    .token(accessToken)
+                    .userId(user.getId())
+                    .user(UserSummary.from(user))
+                    .build();
+        }
+    }
+
+    /*
+     * 서버 내부에서만 사용하는 발급 결과.
+     * refreshToken은 HttpOnly Cookie로 내려가며 JSON body에는 포함하지 않습니다.
+     */
+    @Getter
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class TokenIssueResult {
+        private String accessToken;
+        private String refreshToken;
+        private User user;
+
+        public TokenResponse toResponse() {
+            return TokenResponse.of(accessToken, user);
+        }
     }
 }
