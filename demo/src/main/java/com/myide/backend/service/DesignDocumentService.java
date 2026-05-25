@@ -5,7 +5,7 @@ import com.myide.backend.domain.design.DesignDocument;
 import com.myide.backend.domain.workspace.Workspace;
 import com.myide.backend.dto.design.DesignDocumentRequest;
 import com.myide.backend.dto.design.DesignDocumentResponse;
-import com.myide.backend.repository.DesignDocumentRepository;
+import com.myide.backend.repository.design.DesignDocumentRepository;
 import com.myide.backend.repository.UserRepository;
 import com.myide.backend.repository.workspace.WorkspaceRepository;
 import lombok.RequiredArgsConstructor;
