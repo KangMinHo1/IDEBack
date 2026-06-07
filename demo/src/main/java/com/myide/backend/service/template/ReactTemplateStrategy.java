@@ -15,135 +15,182 @@ public class ReactTemplateStrategy implements ProjectTemplateStrategy {
 
     @Override
     public boolean supports(TemplateType templateType) {
-        // 이 전문가는 'REACT' 타입일 때만 출동합니다!
         return templateType == TemplateType.REACT;
     }
 
     @Override
     public void generateTemplate(Path projectRoot, LanguageType language) throws IOException {
-        log.info("⚛️ React 템플릿 생성 시작");
+        log.info("⚛️ Vite React 템플릿 생성 시작");
 
-        // 1. 디렉토리 구조 만들기 (public, src 폴더)
         Path publicDir = projectRoot.resolve("public");
         Path srcDir = projectRoot.resolve("src");
+
         Files.createDirectories(publicDir);
         Files.createDirectories(srcDir);
 
-        // 2. package.json 생성 (리액트 라이브러리 정보)
-        String packageJson = "{\n" +
-                "  \"name\": \"vside-react-app\",\n" +
-                "  \"version\": \"1.0.0\",\n" +
-                "  \"private\": true,\n" +
-                "  \"dependencies\": {\n" +
-                "    \"react\": \"^18.2.0\",\n" +
-                "    \"react-dom\": \"^18.2.0\",\n" +
-                "    \"react-scripts\": \"5.0.1\"\n" +
-                "  },\n" +
-                "  \"scripts\": {\n" +
-                "    \"start\": \"react-scripts start\",\n" +
-                "    \"build\": \"react-scripts build\"\n" +
-                "  },\n" +
-                "  \"browserslist\": {\n" +
-                "    \"production\": [\n" +
-                "      \">0.2%\",\n" +
-                "      \"not dead\",\n" +
-                "      \"not op_mini all\"\n" +
-                "    ],\n" +
-                "    \"development\": [\n" +
-                "      \"last 1 chrome version\",\n" +
-                "      \"last 1 firefox version\",\n" +
-                "      \"last 1 safari version\"\n" +
-                "    ]\n" +
-                "  }\n" +
-                "}";
+        String packageJson = """
+                {
+                  "name": "wevais-react-app",
+                  "version": "1.0.0",
+                  "private": true,
+                  "type": "module",
+                  "scripts": {
+                    "dev": "vite",
+                    "start": "vite",
+                    "build": "vite build",
+                    "preview": "vite preview"
+                  },
+                  "dependencies": {
+                    "@vitejs/plugin-react": "^5.0.0",
+                    "vite": "^7.0.0",
+                    "react": "^19.0.0",
+                    "react-dom": "^19.0.0"
+                  },
+                  "devDependencies": {}
+                }
+                """;
+
         Files.writeString(projectRoot.resolve("package.json"), packageJson);
 
-        // 3. public/index.html 생성 (화면 뼈대)
-        String indexHtml = "<!DOCTYPE html>\n" +
-                "<html lang=\"ko\">\n" +
-                "  <head>\n" +
-                "    <meta charset=\"utf-8\" />\n" +
-                "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n" +
-                "    <title>VSIDE React App</title>\n" +
-                "  </head>\n" +
-                "  <body>\n" +
-                "    <noscript>You need to enable JavaScript to run this app.</noscript>\n" +
-                "    <div id=\"root\"></div>\n" +
-                "  </body>\n" +
-                "</html>";
-        Files.writeString(publicDir.resolve("index.html"), indexHtml);
+        String indexHtml = """
+                <!DOCTYPE html>
+                <html lang="ko">
+                  <head>
+                    <meta charset="UTF-8" />
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+                    <title>WEVAIS React App</title>
+                  </head>
+                  <body>
+                    <div id="root"></div>
+                    <script type="module" src="/src/main.jsx"></script>
+                  </body>
+                </html>
+                """;
 
-        // 4. src/index.js 생성 (리액트 시작점)
-        String indexJs = "import React from 'react';\n" +
-                "import ReactDOM from 'react-dom/client';\n" +
-                "import App from './App';\n" +
-                "\n" +
-                "const root = ReactDOM.createRoot(document.getElementById('root'));\n" +
-                "root.render(\n" +
-                "  <React.StrictMode>\n" +
-                "    <App />\n" +
-                "  </React.StrictMode>\n" +
-                ");";
-        Files.writeString(srcDir.resolve("index.js"), indexJs);
+        Files.writeString(projectRoot.resolve("index.html"), indexHtml);
 
-        // 5. src/App.js 생성 (메인 컴포넌트)
-        String appJs = "import React, { useState } from 'react';\n" +
-                "import './App.css';\n" +
-                "\n" +
-                "function App() {\n" +
-                "  const [count, setCount] = useState(0);\n" +
-                "\n" +
-                "  return (\n" +
-                "    <div className=\"App\">\n" +
-                "      <header className=\"App-header\">\n" +
-                "        <h1>⚛️ Hello VSIDE React!</h1>\n" +
-                "        <p>실시간으로 코드를 수정하고 저장(Ctrl+S)해보세요.</p>\n" +
-                "        <div className=\"counter-box\">\n" +
-                "          <button onClick={() => setCount(count + 1)}>\n" +
-                "            클릭 횟수: {count}\n" +
-                "          </button>\n" +
-                "        </div>\n" +
-                "      </header>\n" +
-                "    </div>\n" +
-                "  );\n" +
-                "}\n" +
-                "\n" +
-                "export default App;";
-        Files.writeString(srcDir.resolve("App.js"), appJs);
+        String mainJsx = """
+                import React from 'react';
+                import { createRoot } from 'react-dom/client';
+                import App from './App.jsx';
+                import './style.css';
 
-        // 6. src/App.css 생성 (예쁜 스타일)
-        String appCss = ".App {\n" +
-                "  text-align: center;\n" +
-                "  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;\n" +
-                "}\n" +
-                "\n" +
-                ".App-header {\n" +
-                "  background-color: #282c34;\n" +
-                "  min-height: 100vh;\n" +
-                "  display: flex;\n" +
-                "  flex-direction: column;\n" +
-                "  align-items: center;\n" +
-                "  justify-content: center;\n" +
-                "  color: white;\n" +
-                "}\n" +
-                "\n" +
-                "button {\n" +
-                "  padding: 12px 24px;\n" +
-                "  font-size: 1.2rem;\n" +
-                "  font-weight: bold;\n" +
-                "  border: none;\n" +
-                "  border-radius: 8px;\n" +
-                "  background-color: #61dafb;\n" +
-                "  color: #282c34;\n" +
-                "  cursor: pointer;\n" +
-                "  transition: transform 0.1s;\n" +
-                "}\n" +
-                "\n" +
-                "button:active {\n" +
-                "  transform: scale(0.95);\n" +
-                "}";
-        Files.writeString(srcDir.resolve("App.css"), appCss);
+                createRoot(document.getElementById('root')).render(
+                  <React.StrictMode>
+                    <App />
+                  </React.StrictMode>
+                );
+                """;
 
-        log.info("⚛️ React 템플릿 파일 세팅 완료!");
+        Files.writeString(srcDir.resolve("main.jsx"), mainJsx);
+
+        String appJsx = """
+                import { useState } from 'react';
+
+                function App() {
+                  const [count, setCount] = useState(0);
+
+                  return (
+                    <main className="app">
+                      <section className="card">
+                        <p className="badge">Vite React Template</p>
+                        <h1>WEVAIS React App</h1>
+                        <p className="description">
+                          React 기반 프론트엔드 프로젝트입니다. 파일을 수정하고 저장하면 화면에 바로 반영됩니다.
+                        </p>
+
+                        <button onClick={() => setCount(count + 1)}>
+                          클릭 횟수: {count}
+                        </button>
+                      </section>
+                    </main>
+                  );
+                }
+
+                export default App;
+                """;
+
+        Files.writeString(srcDir.resolve("App.jsx"), appJsx);
+
+        String styleCss = """
+                * {
+                  box-sizing: border-box;
+                }
+
+                body {
+                  margin: 0;
+                  font-family: Arial, Helvetica, sans-serif;
+                  background: #f3f6fb;
+                  color: #111827;
+                }
+
+                .app {
+                  min-height: 100vh;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  padding: 40px;
+                }
+
+                .card {
+                  width: min(520px, 100%);
+                  padding: 40px;
+                  border-radius: 24px;
+                  background: white;
+                  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.12);
+                  text-align: center;
+                }
+
+                .badge {
+                  display: inline-flex;
+                  margin: 0 0 16px;
+                  padding: 6px 12px;
+                  border-radius: 999px;
+                  background: #eef2ff;
+                  color: #4f46e5;
+                  font-size: 13px;
+                  font-weight: 700;
+                }
+
+                h1 {
+                  margin: 0;
+                  font-size: 36px;
+                  letter-spacing: -0.04em;
+                }
+
+                .description {
+                  margin: 16px 0 28px;
+                  color: #6b7280;
+                  line-height: 1.6;
+                }
+
+                button {
+                  border: none;
+                  border-radius: 12px;
+                  padding: 12px 20px;
+                  background: #2563eb;
+                  color: white;
+                  font-size: 15px;
+                  font-weight: 700;
+                  cursor: pointer;
+                }
+
+                button:hover {
+                  background: #1d4ed8;
+                }
+                """;
+
+        Files.writeString(srcDir.resolve("style.css"), styleCss);
+
+        String gitignore = """
+                node_modules
+                dist
+                .env
+                .env.local
+                """;
+
+        Files.writeString(projectRoot.resolve(".gitignore"), gitignore);
+
+        log.info("⚛️ Vite React 템플릿 파일 세팅 완료");
     }
 }
