@@ -47,12 +47,12 @@ public class NextTemplateStrategy implements ProjectTemplateStrategy {
                   "name": "wevais-next-app",
                   "version": "1.0.0",
                   "private": true,
-                  "scripts": {
-                    "dev": "next dev -H 0.0.0.0 -p 3001",
-                    "start": "next start -H 0.0.0.0 -p 3001",
-                    "build": "next build",
-                    "lint": "next lint"
-                  },
+                 "scripts": {
+                      "dev": "next dev -H 0.0.0.0",
+                      "start": "next start -H 0.0.0.0",
+                      "build": "next build",
+                      "lint": "next lint"
+                    },
                   "dependencies": {
                     "next": "^15.0.0",
                     "react": "^19.0.0",

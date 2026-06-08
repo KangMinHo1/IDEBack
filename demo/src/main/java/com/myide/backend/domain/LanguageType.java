@@ -11,6 +11,7 @@ public enum LanguageType {
             "public class Main {\n    public static void main(String[] args) {\n        System.out.println(\"Hello Java!\");\n    }\n}",
             "{project}.jar"
     ),
+
     PYTHON(
             "python3 -u {file}",
             null,
@@ -18,6 +19,7 @@ public enum LanguageType {
             "print('Hello Python!')",
             null
     ),
+
     JAVASCRIPT(
             "node {file}",
             null,
@@ -25,20 +27,31 @@ public enum LanguageType {
             "console.log('Hello JavaScript!');",
             null
     ),
+
+    TYPESCRIPT(
+            "npx ts-node {file}",
+            "npx tsc",
+            "index.ts",
+            "const message: string = 'Hello TypeScript!';\nconsole.log(message);",
+            "dist"
+    ),
+
     CPP(
             "g++ -o $(basename {file} .cpp) *.cpp && ./$(basename {file} .cpp)",
             "g++ -o {output} *.cpp",
             "main.cpp",
             "#include <iostream>\n\nint main() {\n    std::cout << \"Hello C++!\" << std::endl;\n    return 0;\n}",
-            "{project}.exe" // 💡 기존 "main" 대신 이렇게 변경!
+            "{project}.exe"
     ),
+
     C(
             "gcc -o $(basename {file} .c) *.c && ./$(basename {file} .c)",
             "gcc -o {output} *.c",
             "main.c",
             "#include <stdio.h>\n\nint main() {\n    printf(\"Hello C!\\n\");\n    return 0;\n}",
-            "{project}.exe" // 💡 기존 "main" 대신 이렇게 변경!
+            "{project}.exe"
     ),
+
     CSHARP(
             "dotnet run",
             "dotnet build -o ./build_output",
@@ -46,6 +59,7 @@ public enum LanguageType {
             "using System;\n\nclass Program {\n    static void Main() {\n        Console.WriteLine(\"Hello C#!\");\n    }\n}",
             "build_output"
     ),
+
     HTML(
             "cat {file}",
             null,
@@ -60,7 +74,13 @@ public enum LanguageType {
     private final String defaultCode;
     private final String outputFileName;
 
-    LanguageType(String runCommand, String buildCommand, String defaultFileName, String defaultCode, String outputFileName) {
+    LanguageType(
+            String runCommand,
+            String buildCommand,
+            String defaultFileName,
+            String defaultCode,
+            String outputFileName
+    ) {
         this.runCommand = runCommand;
         this.buildCommand = buildCommand;
         this.defaultFileName = defaultFileName;
