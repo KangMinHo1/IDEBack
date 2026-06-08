@@ -35,22 +35,38 @@ public class ReactTemplateStrategy implements ProjectTemplateStrategy {
                   "private": true,
                   "type": "module",
                   "scripts": {
-                    "dev": "vite",
-                    "start": "vite",
+                    "dev": "vite --host 0.0.0.0",
+                    "start": "vite --host 0.0.0.0",
                     "build": "vite build",
-                    "preview": "vite preview"
+                    "preview": "vite preview --host 0.0.0.0"
                   },
                   "dependencies": {
-                    "@vitejs/plugin-react": "^5.0.0",
-                    "vite": "^7.0.0",
-                    "react": "^19.0.0",
-                    "react-dom": "^19.0.0"
+                    "react": "^18.2.0",
+                    "react-dom": "^18.2.0"
                   },
-                  "devDependencies": {}
+                  "devDependencies": {
+                    "@vitejs/plugin-react": "^4.3.1",
+                    "vite": "^5.4.11"
+                  }
                 }
                 """;
 
         Files.writeString(projectRoot.resolve("package.json"), packageJson);
+
+        String viteConfig = """
+        import { defineConfig } from 'vite';
+        import react from '@vitejs/plugin-react';
+
+        export default defineConfig({
+          plugins: [react()],
+          server: {
+            host: '0.0.0.0',
+            port: 5173
+          }
+        });
+        """;
+
+        Files.writeString(projectRoot.resolve("vite.config.js"), viteConfig);
 
         String indexHtml = """
                 <!DOCTYPE html>
@@ -58,7 +74,7 @@ public class ReactTemplateStrategy implements ProjectTemplateStrategy {
                   <head>
                     <meta charset="UTF-8" />
                     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-                    <title>WEVAIS React App</title>
+                    <title>WVAIS React App</title>
                   </head>
                   <body>
                     <div id="root"></div>
@@ -85,7 +101,7 @@ public class ReactTemplateStrategy implements ProjectTemplateStrategy {
         Files.writeString(srcDir.resolve("main.jsx"), mainJsx);
 
         String appJsx = """
-                import { useState } from 'react';
+        import React, { useState } from 'react';
 
                 function App() {
                   const [count, setCount] = useState(0);
