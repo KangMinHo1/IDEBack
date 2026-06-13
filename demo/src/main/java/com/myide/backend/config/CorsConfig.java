@@ -12,6 +12,8 @@ public class CorsConfig implements WebMvcConfigurer {
                 .allowedOriginPatterns(
                         "http://localhost:3000",
                         "http://127.0.0.1:3000",
+                        "http://localhost:3001",
+                        "http://127.0.0.1:3001",
                         "http://localhost:5173", // 💡 [핵심] 현재 프론트엔드 포트(5173) 추가!
                         "http://127.0.0.1:5173"
                 )
