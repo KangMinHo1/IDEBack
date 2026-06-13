@@ -3,8 +3,10 @@ package com.myide.backend.service;
 import com.myide.backend.dto.ide.FileNode;
 import com.myide.backend.dto.ide.FileRequest;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.util.FileSystemUtils;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -44,6 +46,22 @@ public class FileService {
         return branchName;
     }
 
+    private String normalizeFilePath(String filePath) {
+        return String.valueOf(filePath == null ? "" : filePath)
+                .replace("\\", "/")
+                .replaceAll("^/+", "")
+                .replaceAll("/+", "/")
+                .trim();
+    }
+
+    private ResponseStatusException badFileRequest(String message) {
+        return new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
+    }
+
+    private ResponseStatusException notFoundFileRequest(String message) {
+        return new ResponseStatusException(HttpStatus.NOT_FOUND, message);
+    }
+
     private Path getSecureTargetPath(
             String workspaceId,
             String projectName,
@@ -56,7 +74,13 @@ public class FileService {
                 .getProjectPath(workspaceId, projectName, normalizedBranchName)
                 .normalize();
 
-        Path target = root.resolve(filePath).normalize();
+        String normalizedFilePath = normalizeFilePath(filePath);
+
+        if (normalizedFilePath.isBlank()) {
+            throw badFileRequest("파일 경로가 비어 있습니다.");
+        }
+
+        Path target = root.resolve(normalizedFilePath).normalize();
 
         if (!target.startsWith(root)) {
             throw new SecurityException("잘못된 파일 접근입니다. (해킹 시도 차단)");
@@ -74,12 +98,14 @@ public class FileService {
                 normalizedBranchName
         );
 
-        if (!Files.exists(targetDir)) {
-            return FileNode.builder()
-                    .id(projectName)
+        if (!Files.exists(targetDir) || !Files.isDirectory(targetDir)) {
+            FileNode emptyRoot = FileNode.builder()
+                    .id("root")
                     .name(projectName)
-                    .type("project")
+                    .type("folder")
                     .build();
+            emptyRoot.setChildren(Collections.emptyList());
+            return emptyRoot;
         }
 
         return traverseDirectory(targetDir, targetDir, projectName);
@@ -97,6 +123,18 @@ public class FileService {
                 branchName,
                 filePath
         );
+
+        if (!Files.exists(target)) {
+            throw notFoundFileRequest("파일을 찾을 수 없습니다: " + normalizeFilePath(filePath));
+        }
+
+        if (Files.isDirectory(target)) {
+            throw badFileRequest("폴더는 파일처럼 열 수 없습니다: " + normalizeFilePath(filePath));
+        }
+
+        if (!Files.isRegularFile(target)) {
+            throw badFileRequest("일반 파일만 열 수 있습니다: " + normalizeFilePath(filePath));
+        }
 
         try {
             return Files.readString(target, StandardCharsets.UTF_8);
