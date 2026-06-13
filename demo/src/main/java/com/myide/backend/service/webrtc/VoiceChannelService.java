@@ -2,7 +2,6 @@ package com.myide.backend.service.webrtc;
 
 import com.myide.backend.domain.webrtc.VoiceChannelEntity;
 import com.myide.backend.dto.webrtc.VoiceChannel;
-
 import com.myide.backend.repository.webrtc.VoiceChannelRepository;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -170,43 +169,23 @@ public class VoiceChannelService {
     public VoiceChannel ensureDefaultChannel(String workspaceId) {
         String safeWorkspaceId = normalizeWorkspaceId(workspaceId);
 
-        Optional<VoiceChannelEntity> optionalExisting =
-                voiceChannelRepository.findByWorkspaceIdAndChannelId(
+        voiceChannelRepository.upsertDefaultChannel(
+                safeWorkspaceId,
+                DEFAULT_CHANNEL_ID,
+                DEFAULT_CHANNEL_NAME,
+                DEFAULT_CHANNEL_ICON
+        );
+
+        VoiceChannelEntity entity = voiceChannelRepository
+                .findByWorkspaceIdAndChannelId(
                         safeWorkspaceId,
                         DEFAULT_CHANNEL_ID
-                );
+                )
+                .orElseThrow(() -> new IllegalStateException(
+                        "Default voice channel was not created. workspaceId=" + safeWorkspaceId
+                ));
 
-        if (optionalExisting.isPresent()) {
-            VoiceChannelEntity existing = optionalExisting.get();
-
-            if (existing.isDeleted()) {
-                existing.setDeleted(false);
-                existing.setDeletedAt(null);
-                existing.setName(DEFAULT_CHANNEL_NAME);
-                existing.setIcon(DEFAULT_CHANNEL_ICON);
-                existing.setSortOrder(0);
-
-                return toDto(voiceChannelRepository.save(existing));
-            }
-
-            return toDto(existing);
-        }
-
-        VoiceChannelEntity entity = VoiceChannelEntity.builder()
-                .workspaceId(safeWorkspaceId)
-                .channelId(DEFAULT_CHANNEL_ID)
-                .name(DEFAULT_CHANNEL_NAME)
-                .icon(DEFAULT_CHANNEL_ICON)
-                .createdBy(null)
-                .createdAt(Instant.EPOCH)
-                .deleted(false)
-                .deletedAt(null)
-                .sortOrder(0)
-                .build();
-
-        VoiceChannelEntity saved = voiceChannelRepository.save(entity);
-
-        return toDto(saved);
+        return toDto(entity);
     }
 
     private int getNextSortOrder(String workspaceId) {
