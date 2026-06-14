@@ -15,6 +15,11 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import com.myide.backend.domain.notification.NotificationType;
+import com.myide.backend.domain.post.Post;
+import com.myide.backend.repository.post.PostRepository;
+import com.myide.backend.service.NotificationService;
+
 @RestController
 @RequestMapping("/api/posts")
 @RequiredArgsConstructor
@@ -22,6 +27,8 @@ public class PostController {
 
     private final PostService postService;
     private final UserRepository userRepository; // 💡 유저 정보를 조회하기 위해 주입
+    private final NotificationService notificationService;
+    private final PostRepository postRepository;
 
     // ==========================================
     // 1. 게시글 목록 조회
@@ -72,6 +79,15 @@ public class PostController {
                 : user.getEmail();
 
         Long newPostId = postService.createPost(request, currentUserId, authorName);
+
+        notificationService.notifyAllUsersExcept(
+                currentUserId,
+                NotificationType.BOARD_POST,
+                "게시판 알림",
+                authorName + "님이 새 게시글을 작성했습니다: " + request.getTitle(),
+                "/community/" + newPostId
+        );
+
         return ResponseEntity.ok(newPostId);
     }
 
@@ -147,6 +163,23 @@ public class PostController {
                 ? user.getNickname()
                 : user.getEmail();
 
-        return ResponseEntity.ok(postService.createComment(postId, request, currentUserId, authorName));
+        PostDto.CommentResponse response =
+                postService.createComment(postId, request, currentUserId, authorName);
+
+        Post post = postRepository.findById(postId)
+                .orElseThrow(() -> new IllegalArgumentException("게시글을 찾을 수 없습니다."));
+
+        if (!post.getAuthorId().equals(currentUserId)) {
+            notificationService.notifyUser(
+                    post.getAuthorId(),
+                    null,
+                    NotificationType.BOARD_COMMENT,
+                    "댓글 알림",
+                    authorName + "님이 내 게시글에 댓글을 남겼습니다.",
+                    "/community/" + postId
+            );
+        }
+
+        return ResponseEntity.ok(response);
     }
 }

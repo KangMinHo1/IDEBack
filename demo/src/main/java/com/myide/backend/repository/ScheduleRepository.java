@@ -26,6 +26,10 @@ public interface ScheduleRepository extends JpaRepository<Schedule, Long> {
             LocalDate rangeEnd,
             LocalDate rangeStart
     );
+    List<Schedule> findByStartDateLessThanEqualAndEndDateGreaterThanEqual(
+            LocalDate today,
+            LocalDate today2
+    );
 
     boolean existsByUuidAndWorkspace_Uuid(String uuid, String workspaceUuid);
 
