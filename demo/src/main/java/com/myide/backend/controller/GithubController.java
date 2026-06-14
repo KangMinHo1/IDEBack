@@ -63,7 +63,7 @@ public class GithubController {
         User user = userRepository.findById(currentUserId)
                 .orElseThrow(() -> new RuntimeException("사용자를 찾을 수 없습니다."));
 
-        user.updateGithubAccessToken(null);
+        user.clearGithubInfo();
         userRepository.save(user);
 
         Map<String, Object> body = new LinkedHashMap<>();

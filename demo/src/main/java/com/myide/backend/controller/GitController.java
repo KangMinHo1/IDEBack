@@ -4,6 +4,7 @@ import com.myide.backend.domain.User;
 import com.myide.backend.dto.ide.FileRequest;
 import com.myide.backend.repository.UserRepository;
 import com.myide.backend.service.GitService;
+import com.myide.backend.service.NotificationService;
 import com.myide.backend.service.ProjectService;
 import com.myide.backend.service.WorkspaceService;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +20,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import com.myide.backend.domain.notification.NotificationType;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -40,6 +42,7 @@ public class GitController {
     private final WorkspaceService workspaceService;
     private final GitService gitService;
     private final UserRepository userRepository;
+    private final NotificationService notificationService;
 
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<String> handleBadRequest(IllegalArgumentException e) {
@@ -249,6 +252,15 @@ public class GitController {
 
         gitService.commit(repoPath, commitMessage, user.getNickname(), user.getEmail());
 
+        notificationService.notifyWorkspaceMembersExcept(
+                workspaceId,
+                currentUserId,
+                NotificationType.GIT_COMMIT,
+                "커밋 알림",
+                user.getNickname() + "님이 " + branchName + " 브랜치에 커밋했습니다: " + commitMessage,
+                "/projects/" + workspaceId + "?mode=team"
+        );
+
         return ResponseEntity.ok("Commit successfully");
     }
 
@@ -278,6 +290,16 @@ public class GitController {
 
         try {
             gitService.push(repoPath, token);
+
+            notificationService.notifyWorkspaceMembersExcept(
+                    workspaceId,
+                    currentUserId,
+                    NotificationType.GIT_PUSH,
+                    "푸쉬 알림",
+                    user.getNickname() + "님이 " + branchName + " 브랜치로 푸쉬했습니다.",
+                    "/projects/" + workspaceId + "?mode=team"
+            );
+
             return ResponseEntity.ok("Push successfully");
         } catch (Exception e) {
             String errorMsg = e.getMessage() != null ? e.getMessage().toLowerCase() : "";
@@ -287,7 +309,7 @@ public class GitController {
                     || errorMsg.contains("permitted")
                     || errorMsg.contains("could not read username")) {
 
-                user.updateGithubAccessToken(null);
+                user.clearGithubInfo();
                 userRepository.save(user);
 
                 return ResponseEntity.status(403).body("GITHUB_TOKEN_EXPIRED");
@@ -332,7 +354,7 @@ public class GitController {
                     || errorMsg.contains("permitted")
                     || errorMsg.contains("could not read username")) {
 
-                user.updateGithubAccessToken(null);
+                user.clearGithubInfo();
                 userRepository.save(user);
 
                 return ResponseEntity.status(403).body("GITHUB_TOKEN_EXPIRED");
@@ -343,7 +365,10 @@ public class GitController {
     }
 
     @PostMapping("/merge")
-    public ResponseEntity<String> mergeBranch(@RequestBody Map<String, String> body) {
+    public ResponseEntity<String> mergeBranch(
+            @RequestBody Map<String, String> body,
+            @AuthenticationPrincipal Long currentUserId
+    ) {
         String workspaceId = requireBodyValue(body, "workspaceId", "workspaceId가 없습니다.");
         String projectName = requireBodyValue(body, "projectName", "projectName이 없습니다.");
         String branchName = validateBranchName(body.get("branchName"));
@@ -354,6 +379,15 @@ public class GitController {
         boolean isSuccess = gitService.merge(repoPath, targetBranch);
 
         if (!isSuccess) {
+            notificationService.notifyWorkspaceMembersExcept(
+                    workspaceId,
+                    currentUserId,
+                    NotificationType.ERROR,
+                    "Git 충돌 알림",
+                    branchName + " 브랜치 병합 중 충돌이 발생했습니다.",
+                    "/projects/" + workspaceId + "?mode=team"
+            );
+
             return ResponseEntity.ok("Merge conflict");
         }
 

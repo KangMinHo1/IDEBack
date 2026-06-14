@@ -5,6 +5,7 @@ import com.myide.backend.domain.workspace.Workspace;
 import com.myide.backend.domain.workspace.WorkspaceMember;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+
 import java.util.List;
 import java.util.Optional;
 
@@ -24,4 +25,12 @@ public interface WorkspaceMemberRepository extends JpaRepository<WorkspaceMember
 
     // 💡  특정 워크스페이스에서 수락(ACCEPTED) 상태인 멤버 목록 조회
     List<WorkspaceMember> findByWorkspace_UuidAndStatus(String workspaceId, WorkspaceMember.JoinStatus status);
+
+
+
+    boolean existsByWorkspace_UuidAndUser_IdAndStatus(
+            String workspaceId,
+            Long userId,
+            WorkspaceMember.JoinStatus status
+    );
 }

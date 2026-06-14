@@ -17,6 +17,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
+import com.myide.backend.domain.notification.NotificationType;
+
+
 
 import java.time.LocalDate;
 import java.util.List;
@@ -30,6 +33,7 @@ public class ScheduleService {
     private final DevlogRepository devlogRepository;
     private final WorkspaceRepository workspaceRepository;
     private final UserRepository userRepository;
+    private final NotificationService notificationService;
 
     public List<ScheduleResponse> getSchedules(String workspaceId, Long userId) {
         validateUserId(userId);
@@ -96,6 +100,15 @@ public class ScheduleService {
                 .build();
 
         Schedule saved = scheduleRepository.save(schedule);
+
+        notificationService.notifyWorkspaceMembersExcept(
+                workspace.getUuid(),
+                userId,
+                NotificationType.SCHEDULE,
+                "일정 알림",
+                user.getNickname() + "님이 새 일정을 등록했습니다: " + saved.getTitle(),
+                "/schedules?view=" + workspace.getType().name().toLowerCase() + "&workspaceId=" + workspace.getUuid()
+        );
 
         return ScheduleResponse.from(saved, false);
     }
