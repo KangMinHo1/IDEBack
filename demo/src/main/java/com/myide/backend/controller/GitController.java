@@ -287,7 +287,7 @@ public class GitController {
                     || errorMsg.contains("permitted")
                     || errorMsg.contains("could not read username")) {
 
-                user.updateGithubAccessToken(null);
+                user.clearGithubInfo();
                 userRepository.save(user);
 
                 return ResponseEntity.status(403).body("GITHUB_TOKEN_EXPIRED");
@@ -332,7 +332,7 @@ public class GitController {
                     || errorMsg.contains("permitted")
                     || errorMsg.contains("could not read username")) {
 
-                user.updateGithubAccessToken(null);
+                user.clearGithubInfo();
                 userRepository.save(user);
 
                 return ResponseEntity.status(403).body("GITHUB_TOKEN_EXPIRED");

@@ -29,12 +29,15 @@ public class User {
     @Column(length = 500)
     private String profileImageUrl;
 
-    /*
-     * GitHub OAuth access token 저장 컬럼.
-     * 길이를 넉넉하게 잡아 토큰 길이 변화나 확장에 대비합니다.
-     */
     @Column(length = 1000)
     private String githubAccessToken;
+
+    /**
+     * GitHub API에서 author 필터로 사용할 GitHub login 값.
+     * 예: https://github.com/abc 에서 abc
+     */
+    @Column(length = 100)
+    private String githubUsername;
 
     @Column(nullable = false, updatable = false)
     @Builder.Default
@@ -55,5 +58,15 @@ public class User {
 
     public void updateGithubAccessToken(String token) {
         this.githubAccessToken = token;
+    }
+
+    public void updateGithubInfo(String token, String githubUsername) {
+        this.githubAccessToken = token;
+        this.githubUsername = githubUsername;
+    }
+
+    public void clearGithubInfo() {
+        this.githubAccessToken = null;
+        this.githubUsername = null;
     }
 }
