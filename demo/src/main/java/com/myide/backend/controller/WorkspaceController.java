@@ -20,7 +20,6 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/workspaces")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*")
 public class WorkspaceController {
 
     private final WorkspaceService workspaceService;

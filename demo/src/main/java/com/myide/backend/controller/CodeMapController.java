@@ -13,7 +13,6 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/codemap")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*")
 public class CodeMapController {
 
     private final CodeMapService codeMapService;

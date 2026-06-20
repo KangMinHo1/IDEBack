@@ -24,11 +24,6 @@ import java.nio.file.Paths;
 @RestController
 @RequestMapping("/api/workspaces")
 @RequiredArgsConstructor
-@CrossOrigin(
-        origins = "http://localhost:5173",
-        allowCredentials = "true",
-        exposedHeaders = "Content-Disposition"
-)
 public class IdeController {
 
     private final ProjectService projectService;

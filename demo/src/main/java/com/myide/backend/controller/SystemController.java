@@ -11,7 +11,6 @@ import java.util.stream.Collectors;
 @RestController
 @RequestMapping("/api/system")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*")
 public class SystemController {
 
     // 1. 시스템의 루트 드라이브 목록 조회 (C:\, D:\ 등)

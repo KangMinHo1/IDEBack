@@ -12,8 +12,6 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/ai")
 @RequiredArgsConstructor
-// 기존 CORS 설정이 있다면 그대로 두셔도 됩니다.
-@CrossOrigin(origins = "http://localhost:5173", allowedHeaders = "*")
 public class AiController {
 
     private final AiAssistService aiAssistService;

@@ -153,26 +153,35 @@ public class SecurityConfig {
         /*
          * 요청을 허용할 프론트엔드 주소
          *
-         * localhost:3000은 Next.js 개발 서버,
-         * localhost:5173은 Vite 개발 서버에서 주로 사용된다.
-         *
-         * 127.0.0.1 주소도 함께 허용하여
-         * localhost 대신 IP로 접속했을 때도 CORS 오류가 나지 않게 한다.
+         * localhost는 개인 개발용,
+         * 192.168 / 10 / 172.16~31 대역은 같은 와이파이 또는 핫스팟에서
+         * 다른 PC가 메인 노트북 IP로 접속할 때 사용한다.
          */
         configuration.setAllowedOriginPatterns(List.of(
-                "http://localhost:3000",
-                "http://127.0.0.1:3000",
-                "http://localhost:3001",
-                "http://127.0.0.1:3001",
-                "http://localhost:5173",
-                "http://127.0.0.1:5173"
+                "http://localhost:*",
+                "http://127.0.0.1:*",
+
+                "http://192.168.*.*:*",
+                "http://10.*.*.*:*",
+
+                "http://172.16.*.*:*",
+                "http://172.17.*.*:*",
+                "http://172.18.*.*:*",
+                "http://172.19.*.*:*",
+                "http://172.20.*.*:*",
+                "http://172.21.*.*:*",
+                "http://172.22.*.*:*",
+                "http://172.23.*.*:*",
+                "http://172.24.*.*:*",
+                "http://172.25.*.*:*",
+                "http://172.26.*.*:*",
+                "http://172.27.*.*:*",
+                "http://172.28.*.*:*",
+                "http://172.29.*.*:*",
+                "http://172.30.*.*:*",
+                "http://172.31.*.*:*"
         ));
 
-        /*
-         * 허용할 HTTP 메서드
-         *
-         * OPTIONS는 CORS preflight 요청에 필요하다.
-         */
         configuration.setAllowedMethods(List.of(
                 "GET",
                 "POST",
@@ -182,50 +191,14 @@ public class SecurityConfig {
                 "OPTIONS"
         ));
 
-        /*
-         * 프론트엔드에서 보낼 수 있는 요청 헤더
-         *
-         * Authorization은 JWT 토큰 전달에 필요하고,
-         * Content-Type은 JSON 요청 body 전송에 필요하다.
-         */
-        configuration.setAllowedHeaders(List.of(
-                "Authorization",
-                "Content-Type",
-                "Accept",
-                "Origin",
-                "X-Requested-With"
-        ));
+        configuration.setAllowedHeaders(List.of("*"));
 
-        /*
-         * 프론트엔드에서 읽을 수 있도록 노출할 응답 헤더
-         *
-         * 기본적으로 브라우저는 일부 응답 헤더만 접근할 수 있다.
-         * Authorization 헤더에 새 토큰을 내려주는 구조라면 노출 설정이 필요하다.
-         */
-        configuration.setExposedHeaders(List.of(
-                "Authorization",
-                "Set-Cookie"
-        ));
+        configuration.setExposedHeaders(List.of("*"));
 
-        /*
-         * 쿠키/인증 정보를 포함한 요청 허용
-         *
-         * credentials 옵션을 사용하는 요청을 허용한다.
-         * 단, allowCredentials(true)를 사용할 때는
-         * 허용 origin을 "*"로 두면 안 된다.
-         */
         configuration.setAllowCredentials(true);
 
-        /*
-         * preflight 요청 결과를 브라우저가 캐싱할 시간
-         *
-         * 3600초 = 1시간
-         */
         configuration.setMaxAge(3600L);
 
-        /*
-         * 위에서 만든 CORS 설정을 모든 API 경로에 적용
-         */
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
 

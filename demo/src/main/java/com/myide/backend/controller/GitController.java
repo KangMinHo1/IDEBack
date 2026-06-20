@@ -32,7 +32,6 @@ import java.util.regex.Pattern;
 @RestController
 @RequestMapping("/api/git")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "http://localhost:5173", allowCredentials = "true")
 public class GitController {
 
     private static final Set<String> PROTECTED_BRANCHES = Set.of("master", "main");

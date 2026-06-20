@@ -70,7 +70,6 @@ public class ChatController {
     }
 
     @GetMapping("/api/workspaces/{workspaceId}/chat")
-    @CrossOrigin(origins = "*")
     public ResponseEntity<List<ChatMessageResponse>> getChatHistory(
             @PathVariable String workspaceId,
             @RequestParam Long userId
