@@ -488,4 +488,18 @@ public class GitService {
             throw new RuntimeException("브랜치 삭제 로직 에러: " + e.getMessage());
         }
     }
+
+    public String getHeadHash(Path repoPath) {
+        try {
+            return executeGitCommand(
+                    repoPath,
+                    "git",
+                    "rev-parse",
+                    "--short",
+                    "HEAD"
+            ).trim();
+        } catch (Exception e) {
+            throw new RuntimeException("HEAD hash 조회 실패: " + e.getMessage());
+        }
+    }
 }

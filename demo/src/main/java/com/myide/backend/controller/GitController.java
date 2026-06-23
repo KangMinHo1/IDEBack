@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import com.myide.backend.domain.notification.NotificationType;
+import com.myide.backend.handler.WorkspaceEventWebSocketHandler;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -43,6 +44,7 @@ public class GitController {
     private final GitService gitService;
     private final UserRepository userRepository;
     private final NotificationService notificationService;
+    private final WorkspaceEventWebSocketHandler workspaceEventWebSocketHandler;
 
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<String> handleBadRequest(IllegalArgumentException e) {
@@ -467,7 +469,7 @@ public class GitController {
     }
 
     @PostMapping("/sandbox/apply")
-    public ResponseEntity<String> applySandbox(@RequestBody Map<String, String> body) {
+    public ResponseEntity<?> applySandbox(@RequestBody Map<String, String> body) {
         String workspaceId = requireBodyValue(body, "workspaceId", "workspaceId가 없습니다.");
         String projectName = requireBodyValue(body, "projectName", "projectName이 없습니다.");
         String sandboxBranch = validateBranchName(body.get("sandboxBranch"));
@@ -475,12 +477,26 @@ public class GitController {
         String nickname = sanitizeBranchSegment(body.get("nickname"));
 
         try {
-            Path masterRepoPath = workspaceService.getProjectPath(workspaceId, projectName, "master");
-            Path sandboxRepoPath = workspaceService.getProjectPath(workspaceId, projectName, sandboxBranch);
+            Path masterRepoPath = workspaceService.getProjectPath(
+                    workspaceId,
+                    projectName,
+                    "master"
+            );
+
+            Path sandboxRepoPath = workspaceService.getProjectPath(
+                    workspaceId,
+                    projectName,
+                    sandboxBranch
+            );
 
             try {
                 gitService.stage(sandboxRepoPath, ".");
-                gitService.commit(sandboxRepoPath, commitMessage, nickname, nickname + "@myide.com");
+                gitService.commit(
+                        sandboxRepoPath,
+                        commitMessage,
+                        nickname,
+                        nickname + "@myide.com"
+                );
             } catch (Exception e) {
                 System.out.println("커밋 건너뜀 (변경사항 없음): " + e.getMessage());
             }
@@ -488,14 +504,41 @@ public class GitController {
             boolean isMergeSuccess = gitService.merge(masterRepoPath, sandboxBranch);
 
             if (!isMergeSuccess) {
-                return ResponseEntity.status(409).body("충돌이 발생했습니다. 샌드박스가 보존되었습니다. 코드를 확인해주세요.");
+                return ResponseEntity
+                        .status(409)
+                        .body("충돌이 발생했습니다. 샌드박스가 보존되었습니다. 코드를 확인해주세요.");
             }
+
+            String targetRevision = gitService.getHeadHash(masterRepoPath);
+
+            System.out.println("[SandboxApply] master revision = " + targetRevision);
 
             gitService.deleteBranch(masterRepoPath, sandboxRepoPath, sandboxBranch);
 
-            return ResponseEntity.ok("성공적으로 메인에 코드가 반영되었습니다.");
+            FileRequest eventRequest = new FileRequest();
+            eventRequest.setWorkspaceId(workspaceId);
+            eventRequest.setProjectName(projectName);
+            eventRequest.setBranchName("master");
+            eventRequest.setFilePath("");
+            eventRequest.setType("sandbox");
+            eventRequest.setNewName("");
+
+            workspaceEventWebSocketHandler.broadcastFileTreeChanged(
+                    eventRequest,
+                    "SANDBOX_APPLIED",
+                    targetRevision
+            );
+
+            return ResponseEntity.ok(
+                    Map.of(
+                            "message", "성공적으로 메인에 코드가 반영되었습니다.",
+                            "revision", targetRevision
+                    )
+            );
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body("병합 중 시스템 오류가 발생했습니다: " + e.getMessage());
+            return ResponseEntity
+                    .badRequest()
+                    .body("병합 중 시스템 오류가 발생했습니다: " + e.getMessage());
         }
     }
 }
