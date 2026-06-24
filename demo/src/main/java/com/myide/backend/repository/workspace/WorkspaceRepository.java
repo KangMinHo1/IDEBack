@@ -15,6 +15,7 @@ public interface WorkspaceRepository extends JpaRepository<Workspace, String> {
 
     // uuid와 owner 객체의 id를 함께 검색
     Optional<Workspace> findByUuidAndOwner_Id(String uuid, Long ownerId);
+    Optional<Workspace> findByUuid(String uuid);
 
     // 💡 [버그 수정 2] 멤버 상태(status)가 'ACCEPTED'인 사람만 목록에 표시하도록 조건 추가!
     @Query("SELECT DISTINCT w FROM Workspace w " +

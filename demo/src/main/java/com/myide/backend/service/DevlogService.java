@@ -19,6 +19,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.myide.backend.domain.workspace.WorkspaceMember;
+import com.myide.backend.repository.workspace.WorkspaceMemberRepository;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -31,6 +34,8 @@ public class DevlogService {
     private final ScheduleRepository scheduleRepository;
     private final WorkspaceRepository workspaceRepository;
     private final UserRepository userRepository;
+
+    private final WorkspaceMemberRepository workspaceMemberRepository;
 
     public List<DevlogResponse> getDevlogs(String workspaceId, Long userId) {
         validateUserId(userId);
@@ -199,11 +204,31 @@ public class DevlogService {
     private Workspace getAccessibleWorkspace(String workspaceId, Long userId) {
         validateUserId(userId);
 
-        return workspaceRepository.findByUuidAndOwner_Id(workspaceId, userId)
+        Workspace workspace = workspaceRepository.findByUuid(workspaceId)
                 .orElseThrow(() -> new ResponseStatusException(
-                        HttpStatus.FORBIDDEN,
-                        "워크스페이스 접근 권한이 없습니다."
+                        HttpStatus.NOT_FOUND,
+                        "워크스페이스를 찾을 수 없습니다."
                 ));
+
+        boolean isOwner =
+                workspace.getOwner() != null &&
+                        workspace.getOwner().getId().equals(userId);
+
+        boolean isAcceptedMember =
+                workspaceMemberRepository.existsByWorkspace_UuidAndUser_IdAndStatus(
+                        workspaceId,
+                        userId,
+                        WorkspaceMember.JoinStatus.ACCEPTED
+                );
+
+        if (isOwner || isAcceptedMember) {
+            return workspace;
+        }
+
+        throw new ResponseStatusException(
+                HttpStatus.FORBIDDEN,
+                "워크스페이스 접근 권한이 없습니다."
+        );
     }
 
     private User getUser(Long userId) {
