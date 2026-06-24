@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -27,12 +28,30 @@ public class GitService {
     private static final String EXCLUDE_KEYWORD = "$$codemap$$";
     private static final Set<String> PROTECTED_BRANCHES = Set.of("master", "main");
 
+    private static class CommandResult {
+        private final int exitCode;
+        private final String output;
+
+        private CommandResult(int exitCode, String output) {
+            this.exitCode = exitCode;
+            this.output = output;
+        }
+    }
+
     private boolean isProtectedBranch(String branchName) {
         return branchName != null
                 && PROTECTED_BRANCHES.contains(branchName.toLowerCase(Locale.ROOT));
     }
 
-    private String executeGitCommand(Path directory, String... commands) throws Exception {
+    private String maskSecret(String value) {
+        if (value == null) {
+            return "";
+        }
+
+        return value.replaceAll("://.*@", "://***@");
+    }
+
+    private CommandResult runGitCommand(Path directory, String... commands) throws Exception {
         ProcessBuilder pb = new ProcessBuilder(commands);
         pb.directory(directory.toFile());
         pb.redirectErrorStream(true);
@@ -41,7 +60,9 @@ public class GitService {
 
         StringBuilder output = new StringBuilder();
 
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), "UTF-8"))) {
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8)
+        )) {
             String line;
 
             while ((line = reader.readLine()) != null) {
@@ -50,18 +71,24 @@ public class GitService {
         }
 
         int exitCode = process.waitFor();
+
+        return new CommandResult(exitCode, output.toString());
+    }
+
+    private String executeGitCommand(Path directory, String... commands) throws Exception {
+        CommandResult result = runGitCommand(directory, commands);
         boolean allowStatusFailure = Arrays.asList(commands).contains("status");
 
-        if (exitCode != 0 && !allowStatusFailure) {
-            String safeCommandLog = Arrays.toString(commands).replaceAll("://.*@", "://***@");
-            String safeOutputLog = output.toString().trim().replaceAll("://.*@", "://***@");
+        if (result.exitCode != 0 && !allowStatusFailure) {
+            String safeCommandLog = maskSecret(Arrays.toString(commands));
+            String safeOutputLog = maskSecret(result.output.trim());
 
             log.warn("Git 명령어 실패 [{}]: {}", safeCommandLog, safeOutputLog);
 
             throw new RuntimeException(safeOutputLog);
         }
 
-        return output.toString();
+        return result.output;
     }
 
     public void createRepository(Path masterRepoPath) {
@@ -98,8 +125,41 @@ public class GitService {
         }
     }
 
+    /*
+     * 기존 호출 호환용 메서드입니다.
+     * 다음 ProjectService 수정 후에는 baseBranch를 넘기는 메서드를 사용합니다.
+     */
     public void createWorktree(Path masterRepoPath, Path worktreePath, String branchName) {
+        createWorktree(masterRepoPath, worktreePath, branchName, "master");
+    }
+
+    /*
+     * Sourcetree/Git Flow 방식 브랜치 생성입니다.
+     *
+     * 예:
+     * - baseBranch = develop
+     * - branchName = feature/login
+     *
+     * 실행:
+     * git worktree add -b feature/login <worktreePath> refs/heads/develop
+     */
+    public void createWorktree(
+            Path masterRepoPath,
+            Path worktreePath,
+            String branchName,
+            String baseBranch
+    ) {
         try {
+            String normalizedBaseBranch =
+                    baseBranch == null || baseBranch.trim().isEmpty()
+                            ? "master"
+                            : baseBranch.trim();
+
+            String baseRef =
+                    "HEAD".equalsIgnoreCase(normalizedBaseBranch)
+                            ? "HEAD"
+                            : "refs/heads/" + normalizedBaseBranch;
+
             executeGitCommand(
                     masterRepoPath,
                     "git",
@@ -108,20 +168,154 @@ public class GitService {
                     "-b",
                     branchName,
                     worktreePath.toAbsolutePath().toString(),
-                    "HEAD"
+                    baseRef
             );
 
-            log.info("🌿 Worktree Created via CLI: {} -> {}", branchName, worktreePath);
+            log.info(
+                    "🌿 Worktree Created via CLI: {} from {} -> {}",
+                    branchName,
+                    normalizedBaseBranch,
+                    worktreePath
+            );
         } catch (Exception e) {
             log.error("Worktree Create Failed", e);
             throw new RuntimeException("워크트리 생성 실패: " + e.getMessage());
         }
     }
 
+    public List<String> getLocalBranches(Path repoPath) {
+        try {
+            String output = executeGitCommand(
+                    repoPath,
+                    "git",
+                    "for-each-ref",
+                    "--format=%(refname:short)",
+                    "refs/heads"
+            );
+
+            List<String> branches = new ArrayList<>();
+
+            for (String line : output.split("\n")) {
+                String branchName = line.trim();
+
+                if (!branchName.isEmpty()) {
+                    branches.add(branchName);
+                }
+            }
+
+            branches.sort((a, b) -> {
+                int priorityA = getBranchPriority(a);
+                int priorityB = getBranchPriority(b);
+
+                if (priorityA != priorityB) {
+                    return Integer.compare(priorityA, priorityB);
+                }
+
+                return a.compareToIgnoreCase(b);
+            });
+
+            return branches;
+        } catch (Exception e) {
+            throw new RuntimeException("브랜치 목록 조회 실패: " + e.getMessage());
+        }
+    }
+
+    private int getBranchPriority(String branchName) {
+        if ("master".equalsIgnoreCase(branchName)) return 0;
+        if ("main".equalsIgnoreCase(branchName)) return 1;
+        if ("develop".equalsIgnoreCase(branchName)) return 2;
+        if (branchName != null && branchName.startsWith("feature/")) return 3;
+        if (branchName != null && branchName.startsWith("release/")) return 4;
+        if (branchName != null && branchName.startsWith("hotfix/")) return 5;
+        return 6;
+    }
+
+    public boolean branchExists(Path repoPath, String branchName) {
+        try {
+            CommandResult result = runGitCommand(
+                    repoPath,
+                    "git",
+                    "show-ref",
+                    "--verify",
+                    "--quiet",
+                    "refs/heads/" + branchName
+            );
+
+            return result.exitCode == 0;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    public boolean isWorkingTreeClean(Path repoPath) {
+        try {
+            String output = executeGitCommand(
+                    repoPath,
+                    "git",
+                    "-c",
+                    "core.quotepath=false",
+                    "status",
+                    "--porcelain"
+            );
+
+            for (String line : output.split("\n")) {
+                if (line.trim().isEmpty()) {
+                    continue;
+                }
+
+                String path = line.length() >= 3 ? line.substring(3).trim() : line.trim();
+
+                if (path.contains(EXCLUDE_KEYWORD)) {
+                    continue;
+                }
+
+                return false;
+            }
+
+            return true;
+        } catch (Exception e) {
+            throw new RuntimeException("작업 트리 상태 확인 실패: " + e.getMessage());
+        }
+    }
+
+    private boolean isMergeInProgress(Path repoPath) {
+        try {
+            String mergeHeadPath = executeGitCommand(
+                    repoPath,
+                    "git",
+                    "rev-parse",
+                    "--git-path",
+                    "MERGE_HEAD"
+            ).trim();
+
+            if (mergeHeadPath.isEmpty()) {
+                return false;
+            }
+
+            Path path = Path.of(mergeHeadPath);
+
+            if (!path.isAbsolute()) {
+                path = repoPath.resolve(path).normalize();
+            }
+
+            return Files.exists(path);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     public Map<String, Object> getStatus(Path repoPath) {
         try {
-            boolean isMerging = Files.exists(repoPath.resolve(".git").resolve("MERGE_HEAD"));
-            String output = executeGitCommand(repoPath, "git", "-c", "core.quotepath=false", "status", "--porcelain");
+            boolean isMerging = isMergeInProgress(repoPath);
+
+            String output = executeGitCommand(
+                    repoPath,
+                    "git",
+                    "-c",
+                    "core.quotepath=false",
+                    "status",
+                    "--porcelain"
+            );
 
             List<Map<String, String>> staged = new ArrayList<>();
             List<Map<String, String>> unstaged = new ArrayList<>();
@@ -194,7 +388,14 @@ public class GitService {
             if (".".equals(filePattern)) {
                 log.info("🛡️ [Git] Stage All 요청 감지. 시스템 파일({}) 제외 처리를 시작합니다.", EXCLUDE_KEYWORD);
 
-                String statusOutput = executeGitCommand(repoPath, "git", "status", "--porcelain");
+                String statusOutput = executeGitCommand(
+                        repoPath,
+                        "git",
+                        "-c",
+                        "core.quotepath=false",
+                        "status",
+                        "--porcelain"
+                );
 
                 for (String line : statusOutput.split("\n")) {
                     if (line.length() < 3) continue;
@@ -206,7 +407,7 @@ public class GitService {
                     }
 
                     if (!path.contains(EXCLUDE_KEYWORD)) {
-                        executeGitCommand(repoPath, "git", "add", path);
+                        executeGitCommand(repoPath, "git", "add", "--", path);
                     }
                 }
             } else {
@@ -215,7 +416,7 @@ public class GitService {
                     return;
                 }
 
-                executeGitCommand(repoPath, "git", "add", filePattern);
+                executeGitCommand(repoPath, "git", "add", "--", filePattern);
             }
         } catch (Exception e) {
             throw new RuntimeException("Stage 실패: " + e.getMessage());
@@ -224,7 +425,7 @@ public class GitService {
 
     public void unstage(Path repoPath, String filePattern) {
         try {
-            executeGitCommand(repoPath, "git", "reset", "HEAD", filePattern);
+            executeGitCommand(repoPath, "git", "reset", "HEAD", "--", filePattern);
         } catch (Exception e) {
             throw new RuntimeException("Unstage 실패: " + e.getMessage());
         }
@@ -251,50 +452,157 @@ public class GitService {
         }
     }
 
-    public void push(Path targetPath, String token) {
-        try {
-            String remoteUrl = executeGitCommand(targetPath, "git", "config", "--get", "remote.origin.url").trim();
-
-            if (remoteUrl.isEmpty()) {
-                throw new RuntimeException("원격 저장소(GitHub URL)가 연결되어 있지 않습니다. 먼저 연동해주세요.");
-            }
-
-            String pushUrl = remoteUrl;
-
-            if (remoteUrl.startsWith("https://")) {
-                pushUrl = remoteUrl.replace("https://", "https://" + token + "@");
-            } else if (remoteUrl.startsWith("http://")) {
-                pushUrl = remoteUrl.replace("http://", "http://" + token + "@");
-            }
-
-            String currentBranch = executeGitCommand(targetPath, "git", "rev-parse", "--abbrev-ref", "HEAD").trim();
-
-            log.info("🚀 Pushing branch '{}' to remote...", currentBranch);
-
-            executeGitCommand(targetPath, "git", "push", pushUrl, currentBranch + ":" + currentBranch);
-
-            log.info("✅ Push Completed Successfully!");
-        } catch (Exception e) {
-            log.error("Git Push Failed", e);
-            throw new RuntimeException("푸시 실패: 확인 후 다시 시도해주세요.");
+    private String buildAuthenticatedRemoteUrl(String remoteUrl, String token) {
+        if (remoteUrl == null || remoteUrl.isBlank()) {
+            throw new RuntimeException("원격 저장소가 연결되어 있지 않습니다.");
         }
+
+        if (token == null || token.trim().isEmpty()) {
+            return remoteUrl;
+        }
+
+        if (remoteUrl.startsWith("https://")) {
+            return remoteUrl.replace("https://", "https://" + token + "@");
+        }
+
+        if (remoteUrl.startsWith("http://")) {
+            return remoteUrl.replace("http://", "http://" + token + "@");
+        }
+
+        return remoteUrl;
     }
 
-    public void pull(Path targetPath, String token, String authorName, String authorEmail) {
+    public void fetch(Path targetPath, String token) {
         try {
-            String remoteUrl = executeGitCommand(targetPath, "git", "config", "--get", "remote.origin.url").trim();
+            String remoteUrl = executeGitCommand(
+                    targetPath,
+                    "git",
+                    "config",
+                    "--get",
+                    "remote.origin.url"
+            ).trim();
 
             if (remoteUrl.isEmpty()) {
                 throw new RuntimeException("원격 저장소가 연동되어 있지 않습니다.");
             }
 
-            String pullUrl = remoteUrl;
+            String fetchUrl = buildAuthenticatedRemoteUrl(remoteUrl, token);
 
-            if (remoteUrl.startsWith("https://")) {
-                pullUrl = remoteUrl.replace("https://", "https://" + token + "@");
+            executeGitCommand(targetPath, "git", "fetch", "--prune", fetchUrl);
+
+            log.info("📡 Fetch Completed: {}", targetPath);
+        } catch (Exception e) {
+            log.error("Git Fetch Failed", e);
+            throw new RuntimeException("Fetch 실패: " + e.getMessage());
+        }
+    }
+
+    public void push(Path targetPath, String token) {
+        try {
+            String remoteUrl = executeGitCommand(
+                    targetPath,
+                    "git",
+                    "config",
+                    "--get",
+                    "remote.origin.url"
+            ).trim();
+
+            if (remoteUrl.isEmpty()) {
+                throw new RuntimeException("원격 저장소(GitHub URL)가 연결되어 있지 않습니다. 먼저 연동해주세요.");
             }
 
-            String currentBranch = executeGitCommand(targetPath, "git", "rev-parse", "--abbrev-ref", "HEAD").trim();
+            String pushUrl = buildAuthenticatedRemoteUrl(remoteUrl, token);
+
+            String currentBranch = executeGitCommand(
+                    targetPath,
+                    "git",
+                    "rev-parse",
+                    "--abbrev-ref",
+                    "HEAD"
+            ).trim();
+
+            log.info("🚀 Pushing branch '{}' to remote...", currentBranch);
+
+            executeGitCommand(
+                    targetPath,
+                    "git",
+                    "push",
+                    pushUrl,
+                    currentBranch + ":" + currentBranch
+            );
+
+            log.info("✅ Push Completed Successfully!");
+        } catch (Exception e) {
+            log.error("Git Push Failed", e);
+            throw new RuntimeException("푸시 실패: " + e.getMessage());
+        }
+    }
+
+    public void pushBranch(Path targetPath, String token, String branchName, boolean setUpstream) {
+        try {
+            String remoteUrl = executeGitCommand(
+                    targetPath,
+                    "git",
+                    "config",
+                    "--get",
+                    "remote.origin.url"
+            ).trim();
+
+            if (remoteUrl.isEmpty()) {
+                throw new RuntimeException("원격 저장소(GitHub URL)가 연결되어 있지 않습니다. 먼저 연동해주세요.");
+            }
+
+            String pushUrl = buildAuthenticatedRemoteUrl(remoteUrl, token);
+
+            if (setUpstream) {
+                executeGitCommand(
+                        targetPath,
+                        "git",
+                        "push",
+                        "-u",
+                        pushUrl,
+                        branchName + ":" + branchName
+                );
+            } else {
+                executeGitCommand(
+                        targetPath,
+                        "git",
+                        "push",
+                        pushUrl,
+                        branchName + ":" + branchName
+                );
+            }
+
+            log.info("✅ Push Branch Completed: {}", branchName);
+        } catch (Exception e) {
+            log.error("Git Push Branch Failed", e);
+            throw new RuntimeException("푸시 실패: " + e.getMessage());
+        }
+    }
+
+    public void pull(Path targetPath, String token, String authorName, String authorEmail) {
+        try {
+            String remoteUrl = executeGitCommand(
+                    targetPath,
+                    "git",
+                    "config",
+                    "--get",
+                    "remote.origin.url"
+            ).trim();
+
+            if (remoteUrl.isEmpty()) {
+                throw new RuntimeException("원격 저장소가 연동되어 있지 않습니다.");
+            }
+
+            String pullUrl = buildAuthenticatedRemoteUrl(remoteUrl, token);
+
+            String currentBranch = executeGitCommand(
+                    targetPath,
+                    "git",
+                    "rev-parse",
+                    "--abbrev-ref",
+                    "HEAD"
+            ).trim();
 
             log.info("📥 Pulling branch '{}' from remote...", currentBranch);
 
@@ -318,19 +626,73 @@ public class GitService {
         }
     }
 
+    /*
+     * 기존 API 호환용 메서드입니다.
+     *
+     * 의미:
+     * - 현재 repoPath 브랜치에 targetBranch를 병합합니다.
+     */
     public boolean merge(Path repoPath, String targetBranch) {
-        try {
-            String output = executeGitCommand(repoPath, "git", "merge", targetBranch);
+        return mergeBranchInto(repoPath, targetBranch, false);
+    }
 
-            log.info("🔀 Merged branch '{}' into current branch. Output: {}", targetBranch, output);
+    /*
+     * Sourcetree식 병합의 내부 실행 메서드입니다.
+     *
+     * targetRepoPath:
+     * - 병합을 받을 브랜치의 worktree 경로
+     *
+     * sourceBranch:
+     * - 병합할 브랜치명
+     *
+     * noFastForward:
+     * - true면 git merge --no-ff --no-edit sourceBranch
+     */
+    public boolean mergeBranchInto(
+            Path targetRepoPath,
+            String sourceBranch,
+            boolean noFastForward
+    ) {
+        try {
+            if (isMergeInProgress(targetRepoPath)) {
+                throw new RuntimeException("이미 병합이 진행 중입니다. 먼저 병합을 완료하거나 취소해주세요.");
+            }
+
+            if (!isWorkingTreeClean(targetRepoPath)) {
+                throw new RuntimeException("병합 대상 브랜치에 커밋하지 않은 변경사항이 있습니다. 먼저 커밋하거나 변경사항을 정리해주세요.");
+            }
+
+            String output;
+
+            if (noFastForward) {
+                output = executeGitCommand(
+                        targetRepoPath,
+                        "git",
+                        "merge",
+                        "--no-ff",
+                        "--no-edit",
+                        sourceBranch
+                );
+            } else {
+                output = executeGitCommand(
+                        targetRepoPath,
+                        "git",
+                        "merge",
+                        "--no-edit",
+                        sourceBranch
+                );
+            }
+
+            log.info("🔀 Merged branch '{}' into target repo. Output: {}", sourceBranch, output);
 
             return true;
         } catch (Exception e) {
             String errorMsg = e.getMessage();
 
             if (errorMsg != null
-                    && (errorMsg.toLowerCase().contains("conflict")
-                    || errorMsg.contains("Automatic merge failed"))) {
+                    && (errorMsg.toLowerCase(Locale.ROOT).contains("conflict")
+                    || errorMsg.contains("Automatic merge failed")
+                    || errorMsg.toLowerCase(Locale.ROOT).contains("fix conflicts"))) {
 
                 log.warn("🔀 병합 중 충돌(Conflict) 발생! 프론트엔드가 제어하도록 false를 반환합니다.");
 
@@ -383,7 +745,6 @@ public class GitService {
                     repoPath,
                     "git",
                     "log",
-                    "master",
                     "--all",
                     "--graph",
                     "--topo-order",
@@ -411,7 +772,9 @@ public class GitService {
                     commit.put("date", parts.length > 3 ? parts[3].trim() : "");
                     commit.put("message", parts.length > 4 ? parts[4].trim() : "");
 
-                    String refs = parts.length > 5 ? parts[5].trim().replaceAll("[\\(\\)]", "") : "";
+                    String refs = parts.length > 5
+                            ? parts[5].trim().replaceAll("[\\(\\)]", "")
+                            : "";
 
                     commit.put("refs", refs);
                 } else {
@@ -486,6 +849,20 @@ public class GitService {
         } catch (Exception e) {
             log.error("Branch Delete Failed", e);
             throw new RuntimeException("브랜치 삭제 로직 에러: " + e.getMessage());
+        }
+    }
+
+    public String getHeadHash(Path repoPath) {
+        try {
+            return executeGitCommand(
+                    repoPath,
+                    "git",
+                    "rev-parse",
+                    "--short",
+                    "HEAD"
+            ).trim();
+        } catch (Exception e) {
+            throw new RuntimeException("HEAD hash 조회 실패: " + e.getMessage());
         }
     }
 }

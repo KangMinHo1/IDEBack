@@ -54,7 +54,24 @@ public class WorkspaceEventWebSocketHandler extends TextWebSocketHandler {
         log.info("👋 [WorkspaceEvent] 퇴장: sessionId={}, room={}", session.getId(), room);
     }
 
+    /*
+     * 기존 코드 호환용 메서드
+     *
+     * 기존 파일 생성/삭제/저장 코드가
+     * broadcastFileTreeChanged(request, action)
+     * 형태로 호출하고 있어도 그대로 동작하게 둡니다.
+     */
     public void broadcastFileTreeChanged(FileRequest request, String action) {
+        broadcastFileTreeChanged(request, action, null);
+    }
+
+    /*
+     * 새 메서드
+     *
+     * sandbox 병합처럼 master 내용이 바뀌고,
+     * 협업 room까지 새로 잡아야 하는 경우 revision을 같이 보냅니다.
+     */
+    public void broadcastFileTreeChanged(FileRequest request, String action, String revision) {
         String branchName = normalizeBranchName(request.getBranchName());
 
         String room = buildRoomName(
@@ -71,7 +88,8 @@ public class WorkspaceEventWebSocketHandler extends TextWebSocketHandler {
                 branchName,
                 request.getFilePath(),
                 request.getType(),
-                request.getNewName()
+                request.getNewName(),
+                revision
         );
 
         broadcast(room, message);
@@ -96,7 +114,6 @@ public class WorkspaceEventWebSocketHandler extends TextWebSocketHandler {
             }
 
             log.info("📢 [WorkspaceEvent] broadcast 완료: room={}, payload={}", room, json);
-
         } catch (Exception e) {
             log.error("❌ [WorkspaceEvent] broadcast 실패: room={}", room, e);
         }
@@ -141,6 +158,7 @@ public class WorkspaceEventWebSocketHandler extends TextWebSocketHandler {
         private final String filePath;
         private final String fileType;
         private final String newName;
+        private final String revision;
 
         public FileTreeChangedMessage(
                 String type,
@@ -150,7 +168,8 @@ public class WorkspaceEventWebSocketHandler extends TextWebSocketHandler {
                 String branchName,
                 String filePath,
                 String fileType,
-                String newName
+                String newName,
+                String revision
         ) {
             this.type = type;
             this.action = action;
@@ -160,6 +179,7 @@ public class WorkspaceEventWebSocketHandler extends TextWebSocketHandler {
             this.filePath = filePath;
             this.fileType = fileType;
             this.newName = newName;
+            this.revision = revision;
         }
     }
 }
