@@ -658,10 +658,17 @@ public class GitService {
                 throw new RuntimeException("이미 병합이 진행 중입니다. 먼저 병합을 완료하거나 취소해주세요.");
             }
 
-            if (!isWorkingTreeClean(targetRepoPath)) {
-                throw new RuntimeException("병합 대상 브랜치에 커밋하지 않은 변경사항이 있습니다. 먼저 커밋하거나 변경사항을 정리해주세요.");
-            }
-
+            /*
+             * 중요:
+             * target 브랜치에 미커밋 변경사항이 있어도 무조건 병합을 막지 않습니다.
+             *
+             * 기존에는 isWorkingTreeClean(targetRepoPath) 검사로 인해
+             * develop에서 A 파일을 수정 중이고 샌드박스가 B 파일만 수정했어도
+             * 병합이 실패했습니다.
+             *
+             * Git은 실제로 덮어써질 파일이 없으면 dirty worktree에서도 merge를 허용합니다.
+             * 따라서 전체 dirty check는 제거하고, 실제 병합 가능 여부는 git merge에 맡깁니다.
+             */
             String output;
 
             if (noFastForward) {
@@ -688,15 +695,26 @@ public class GitService {
             return true;
         } catch (Exception e) {
             String errorMsg = e.getMessage();
+            String normalizedError = errorMsg == null
+                    ? ""
+                    : errorMsg.toLowerCase(Locale.ROOT);
 
-            if (errorMsg != null
-                    && (errorMsg.toLowerCase(Locale.ROOT).contains("conflict")
-                    || errorMsg.contains("Automatic merge failed")
-                    || errorMsg.toLowerCase(Locale.ROOT).contains("fix conflicts"))) {
+            if (normalizedError.contains("conflict")
+                    || normalizedError.contains("automatic merge failed")
+                    || normalizedError.contains("fix conflicts")) {
 
                 log.warn("🔀 병합 중 충돌(Conflict) 발생! 프론트엔드가 제어하도록 false를 반환합니다.");
 
                 return false;
+            }
+
+            if (normalizedError.contains("your local changes")
+                    || normalizedError.contains("would be overwritten by merge")
+                    || normalizedError.contains("please commit your changes or stash them")) {
+                throw new RuntimeException(
+                        "병합 대상 브랜치의 미커밋 변경사항 중 샌드박스 병합 결과와 겹치는 파일이 있습니다. " +
+                                "겹치는 파일은 먼저 커밋하거나 정리한 뒤 다시 병합하세요. 원본 오류: " + errorMsg
+                );
             }
 
             throw new RuntimeException("Merge 실패: " + errorMsg);
