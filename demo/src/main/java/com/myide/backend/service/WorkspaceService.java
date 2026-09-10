@@ -32,12 +32,18 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class WorkspaceService {
 
-    private static final String DEFAULT_ROOT = "C:\\WebIDE\\workspaces";
+    /*
+     * 워크스페이스 폴더의 위치는 이제 UserSpaceService 가 사용자별로 정한다.
+     * (예전의 공용 루트 C:\WebIDE\workspaces 는 더 이상 새 워크스페이스에 쓰이지 않는다.
+     *  그 아래에 이미 만들어진 워크스페이스는 DB 에 실제 경로가 남아 있어 그대로 열린다.)
+     */
     private static final String DEFAULT_BRANCH_NAME = "master";
 
     private final WorkspaceRepository workspaceRepository;
     private final WorkspaceMemberRepository workspaceMemberRepository;
     private final UserRepository userRepository;
+    private final UserSpaceService userSpaceService;
+    private final CurrentUserService currentUserService;
 
     /*
      * 브랜치명이 없거나 기존 호환용 main-repo가 들어오면 master로 통일합니다.
@@ -123,11 +129,42 @@ public class WorkspaceService {
                 .normalize();
     }
 
+    /*
+     * 이 경로 아래에 워크스페이스가 하나라도 있는지.
+     *
+     * 폴더 선택 창에서 폴더를 지울 때 쓴다. 워크스페이스를 지우는 기능이 따로 없어서,
+     * 폴더만 지우면 DB 에는 워크스페이스가 남고 디스크만 사라진다. 그러면 목록에는
+     * 보이는데 열면 깨지는 유령이 되고, 안에 있던 코드도 되돌릴 수 없다.
+     */
+    public boolean hasWorkspaceUnder(Path realPath, Long userId) {
+        Path target = realPath.toAbsolutePath().normalize();
+
+        return workspaceRepository.findMyAllWorkspaces(userId).stream()
+                .map(workspace -> Paths.get(workspace.getPath()).toAbsolutePath().normalize())
+                .anyMatch(workspacePath -> workspacePath.startsWith(target));
+    }
+
     @Transactional
     public Workspace createWorkspace(WorkspaceCreateRequest request) {
-        Path rootPath = (request.getPath() != null && !request.getPath().isBlank())
-                ? Paths.get(request.getPath(), request.getName())
-                : Paths.get(DEFAULT_ROOT, request.getName());
+        /*
+         * 워크스페이스 이름이 곧 폴더 이름이 된다. 이름에 / 나 .. 가 들어오면
+         * 폴더가 여러 겹으로 쪼개지거나 개인 폴더 밖으로 나갈 수 있어 먼저 막는다.
+         */
+        userSpaceService.validateFolderName(request.getName());
+
+        /*
+         * 프론트가 보내는 path 는 화면에 보이는 가상 경로(C:\...)다. 진짜 경로로
+         * 바꾸면서 개인 폴더 밖인지도 함께 걸러진다.
+         *
+         * 누구의 폴더인지는 요청 본문의 userId 가 아니라 토큰에서 정한다. 본문 값을
+         * 믿으면 남의 userId 를 적어 그 사람 폴더에 만들 수 있기 때문이다.
+         */
+        Long currentUserId = currentUserService.getCurrentUserId();
+        Path base = userSpaceService.toReal(request.getPath(), currentUserId);
+        Path rootPath = base.resolve(request.getName().trim()).normalize();
+
+        /* 이어 붙인 뒤에도 개인 폴더 안에 남아 있는지 마지막으로 확인한다. */
+        userSpaceService.toVirtual(rootPath, currentUserId);
 
         if (Files.exists(rootPath)) {
             throw new RuntimeException("이미 존재하는 워크스페이스 경로입니다.");

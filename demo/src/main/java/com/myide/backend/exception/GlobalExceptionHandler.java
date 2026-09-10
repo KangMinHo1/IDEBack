@@ -50,6 +50,26 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * 1-2. ApiException 처리
+     *
+     * ApiException은 status를 직접 들고 다니는데, 처리기가 없으면 RuntimeException으로
+     * 떨어져 401/403/404/409가 전부 500으로 바뀐다. 그러면 화면에는 "요청 처리 중 오류"만
+     * 뜨고 진짜 이유가 사라지고, 프론트의 401 재시도(토큰 갱신)도 동작하지 않는다.
+     */
+    @ExceptionHandler(ApiException.class)
+    public ResponseEntity<String> handleApiException(ApiException ex) {
+        HttpStatus status = ex.getStatus();
+
+        if (status.is4xxClientError()) {
+            log.warn("요청 처리 실패: status={}, message={}", status.value(), ex.getMessage());
+        } else {
+            log.error("서버 오류: status={}, message={}", status.value(), ex.getMessage(), ex);
+        }
+
+        return ResponseEntity.status(status).body(ex.getMessage());
+    }
+
+    /**
      * 2. 유효성 검사 실패 (@Valid 에러)
      */
     @ExceptionHandler(MethodArgumentNotValidException.class)

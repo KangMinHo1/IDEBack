@@ -113,6 +113,21 @@ public class SecurityConfig {
                         .requestMatchers("/api/github/**").authenticated()
 
                         /*
+                         * 폴더 탐색 API(/api/system/**)는 여기서 막지 않는다.
+                         *
+                         * 인증이 필요 없다는 뜻이 아니다. SystemController의 모든 메서드가
+                         * 첫 줄에서 CurrentUserService.getCurrentUserId()를 부르고, 토큰이
+                         * 없거나 만료면 401을 던진다. 사용자별 개인 폴더를 가려내려면 어차피
+                         * 누구인지 알아야 하므로 검사를 건너뛸 수 없는 구조다.
+                         *
+                         * 여기서 authenticated()로 막으면 스프링 시큐리티가 먼저 403을 내보내는데,
+                         * 프론트의 apiClient는 401일 때만 토큰을 갱신하고 재시도한다. 그러면
+                         * 액세스 토큰이 만료되는 15분 뒤에 폴더 창이 막힌 채 스스로 회복하지
+                         * 못하고 새로고침해야 풀린다. 그래서 상태 코드를 401로 맞추려고
+                         * 서비스 계층 검사에 맡긴다.
+                         */
+
+                        /*
                          * 개발 중 임시 전체 허용
                          *
                          * 현재는 개발 편의를 위해 나머지 API를 모두 허용한다.
