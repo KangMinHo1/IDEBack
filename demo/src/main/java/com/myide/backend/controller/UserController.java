@@ -3,8 +3,11 @@ package com.myide.backend.controller;
 import com.myide.backend.dto.user.UserDto;
 import com.myide.backend.service.CurrentUserService;
 import com.myide.backend.service.UserService;
+
 import jakarta.validation.Valid;
+
 import lombok.RequiredArgsConstructor;
+
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -16,32 +19,49 @@ public class UserController {
     private final UserService userService;
     private final CurrentUserService currentUserService;
 
+    // =========================================================
     // 회원가입
+    // =========================================================
     @PostMapping
     public ResponseEntity<UserDto.Response> signUp(
             @RequestBody @Valid UserDto.CreateRequest request
     ) {
-        return ResponseEntity.ok(userService.createUser(request));
+        return ResponseEntity.ok(
+                userService.createUser(request)
+        );
     }
 
-    // 회원조회
+    // =========================================================
+    // 회원 조회
+    // =========================================================
     @GetMapping("/{userId}")
     public ResponseEntity<UserDto.Response> getProfile(
             @PathVariable Long userId
     ) {
-        return ResponseEntity.ok(userService.getUser(userId));
+        return ResponseEntity.ok(
+                userService.getUser(userId)
+        );
     }
 
-    // 회원수정
+    // =========================================================
+    // 회원 수정
+    // =========================================================
     @PutMapping("/{userId}")
     public ResponseEntity<UserDto.Response> updateProfile(
             @PathVariable Long userId,
             @RequestBody @Valid UserDto.UpdateRequest request
     ) {
-        return ResponseEntity.ok(userService.updateUser(userId, request));
+        return ResponseEntity.ok(
+                userService.updateUser(
+                        userId,
+                        request
+                )
+        );
     }
 
-    // 회원탈퇴
+    // =========================================================
+    // 회원 탈퇴
+    // =========================================================
     @DeleteMapping("/{userId}")
     public ResponseEntity<UserDto.MessageResponse> withdraw(
             @PathVariable Long userId
@@ -55,46 +75,92 @@ public class UserController {
         );
     }
 
-    // ---------------------------
+    // =========================================================
     // 마이페이지 전용 me API
-    // ---------------------------
+    // =========================================================
 
+    // =========================================================
     // 내 정보 조회
+    // =========================================================
     @GetMapping("/me")
     public ResponseEntity<UserDto.Response> getMyProfile() {
-        Long userId = currentUserService.getCurrentUserId();
 
-        return ResponseEntity.ok(userService.getUser(userId));
+        Long userId =
+                currentUserService.getCurrentUserId();
+
+        return ResponseEntity.ok(
+                userService.getUser(userId)
+        );
     }
 
+    // =========================================================
     // 내 프로필 수정
+    // =========================================================
     @PutMapping("/me")
     public ResponseEntity<UserDto.Response> updateMyProfile(
             @RequestBody @Valid UserDto.UpdateRequest request
     ) {
-        Long userId = currentUserService.getCurrentUserId();
+        Long userId =
+                currentUserService.getCurrentUserId();
 
-        return ResponseEntity.ok(userService.updateUser(userId, request));
+        return ResponseEntity.ok(
+                userService.updateUser(
+                        userId,
+                        request
+                )
+        );
     }
 
+    // =========================================================
+    // 내 사용자명 변경
+    // =========================================================
+    @PatchMapping("/me/nickname")
+    public ResponseEntity<UserDto.Response> changeMyNickname(
+            @RequestBody @Valid UserDto.ChangeNicknameRequest request
+    ) {
+        Long userId =
+                currentUserService.getCurrentUserId();
+
+        return ResponseEntity.ok(
+                userService.changeNickname(
+                        userId,
+                        request.getNickname()
+                )
+        );
+    }
+
+    // =========================================================
     // 내 이메일 변경
+    // =========================================================
     @PatchMapping("/me/email")
     public ResponseEntity<UserDto.Response> changeMyEmail(
             @RequestBody @Valid UserDto.ChangeEmailRequest request
     ) {
-        Long userId = currentUserService.getCurrentUserId();
+        Long userId =
+                currentUserService.getCurrentUserId();
 
-        return ResponseEntity.ok(userService.changeEmail(userId, request));
+        return ResponseEntity.ok(
+                userService.changeEmail(
+                        userId,
+                        request
+                )
+        );
     }
 
+    // =========================================================
     // 내 비밀번호 변경
+    // =========================================================
     @PatchMapping("/me/password")
     public ResponseEntity<UserDto.MessageResponse> changeMyPassword(
             @RequestBody @Valid UserDto.ChangePasswordRequest request
     ) {
-        Long userId = currentUserService.getCurrentUserId();
+        Long userId =
+                currentUserService.getCurrentUserId();
 
-        userService.changePassword(userId, request);
+        userService.changePassword(
+                userId,
+                request
+        );
 
         return ResponseEntity.ok(
                 UserDto.MessageResponse.builder()
@@ -103,10 +169,14 @@ public class UserController {
         );
     }
 
+    // =========================================================
     // 내 계정 삭제
+    // =========================================================
     @DeleteMapping("/me")
     public ResponseEntity<UserDto.MessageResponse> deleteMyAccount() {
-        Long userId = currentUserService.getCurrentUserId();
+
+        Long userId =
+                currentUserService.getCurrentUserId();
 
         userService.deleteUser(userId);
 

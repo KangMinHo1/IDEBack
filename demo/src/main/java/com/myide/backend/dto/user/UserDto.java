@@ -12,10 +12,13 @@ import java.time.LocalDateTime;
 
 public class UserDto {
 
+    // =========================================================
     // 회원 생성
+    // =========================================================
     @Getter
     @NoArgsConstructor
     public static class CreateRequest {
+
         @NotBlank(message = "이메일은 필수입니다.")
         @Email(message = "이메일 형식이 올바르지 않습니다.")
         private String email;
@@ -28,52 +31,85 @@ public class UserDto {
         private String nickname;
     }
 
+    // =========================================================
     // 회원 수정
+    // =========================================================
     @Getter
     @NoArgsConstructor
     public static class UpdateRequest {
+
         @NotBlank(message = "닉네임은 필수입니다.")
         private String nickname;
 
         private String profileImageUrl;
     }
 
-    // 마이페이지 계정 탭 - 이메일 변경 요청 DTO
+    // =========================================================
+    // 마이페이지 - 사용자명 변경
+    // =========================================================
+    @Getter
+    @NoArgsConstructor
+    public static class ChangeNicknameRequest {
+
+        @NotBlank(message = "사용자명은 필수입니다.")
+        @Size(
+                max = 30,
+                message = "사용자명은 30자 이하로 입력해주세요."
+        )
+        private String nickname;
+    }
+
+    // =========================================================
+    // 마이페이지 - 이메일 변경
+    // =========================================================
     @Getter
     @NoArgsConstructor
     public static class ChangeEmailRequest {
+
         @NotBlank(message = "이메일은 필수입니다.")
         @Email(message = "이메일 형식이 올바르지 않습니다.")
         private String email;
     }
 
-    // 마이페이지 계정 탭 - 비밀번호 변경 요청 DTO
+    // =========================================================
+    // 마이페이지 - 비밀번호 변경
+    // =========================================================
     @Getter
     @NoArgsConstructor
     public static class ChangePasswordRequest {
+
         @NotBlank(message = "현재 비밀번호는 필수입니다.")
         private String currentPassword;
 
         @NotBlank(message = "새 비밀번호는 필수입니다.")
-        @Size(min = 8, message = "새 비밀번호는 8자 이상이어야 합니다.")
+        @Size(
+                min = 8,
+                message = "새 비밀번호는 8자 이상이어야 합니다."
+        )
         private String newPassword;
     }
 
+    // =========================================================
     // 공통 메시지 응답
+    // =========================================================
     @Getter
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
     public static class MessageResponse {
+
         private String message;
     }
 
-    // 회원 조회
+    // =========================================================
+    // 회원 조회 응답
+    // =========================================================
     @Getter
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
     public static class Response {
+
         private Long id;
         private String email;
         private String nickname;

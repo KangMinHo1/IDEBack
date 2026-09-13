@@ -1,20 +1,19 @@
 package com.myide.backend.repository;
 
 import com.myide.backend.domain.devlog.Devlog;
-import org.springframework.data.jpa.repository.JpaRepository;
-
 import com.myide.backend.dto.mypage.DateCountRow;
 
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
 import java.util.List;
-
 import java.util.Optional;
 
-public interface DevlogRepository extends JpaRepository<Devlog, Long> {
-
+public interface DevlogRepository
+        extends JpaRepository<Devlog, Long> {
 
     @Query(value = """
         SELECT
@@ -33,19 +32,36 @@ public interface DevlogRepository extends JpaRepository<Devlog, Long> {
             @Param("endDate") LocalDate endDate
     );
 
-
+    /*
+     * 마이페이지 최근 활동용
+     *
+     * 실제 작성자인 createdBy 기준.
+     */
+    List<Devlog> findByCreatedBy_IdOrderByCreatedAtDesc(
+            Long userId,
+            Pageable pageable
+    );
 
     Optional<Devlog> findByUuid(String uuid);
 
-    Optional<Devlog> findByUuidAndWorkspace_Uuid(String uuid, String workspaceUuid);
+    Optional<Devlog> findByUuidAndWorkspace_Uuid(
+            String uuid,
+            String workspaceUuid
+    );
 
-    List<Devlog> findByWorkspace_UuidOrderByWorkedDateDescCreatedAtDesc(String workspaceUuid);
+    List<Devlog> findByWorkspace_UuidOrderByWorkedDateDescCreatedAtDesc(
+            String workspaceUuid
+    );
 
-    List<Devlog> findBySchedule_UuidOrderByWorkedDateDescCreatedAtDesc(String scheduleUuid);
+    List<Devlog> findBySchedule_UuidOrderByWorkedDateDescCreatedAtDesc(
+            String scheduleUuid
+    );
 
-    long countBySchedule_Uuid(String scheduleUuid);
+    long countBySchedule_Uuid(
+            String scheduleUuid
+    );
 
-    boolean existsBySchedule_Uuid(String scheduleUuid);
-
-
+    boolean existsBySchedule_Uuid(
+            String scheduleUuid
+    );
 }

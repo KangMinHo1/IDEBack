@@ -1,11 +1,16 @@
 package com.myide.backend.controller;
 
 import com.myide.backend.dto.mypage.ActivityHeatmapResponse;
+import com.myide.backend.dto.mypage.RecentActivityResponse;
 import com.myide.backend.service.MyPageActivityService;
+
 import lombok.RequiredArgsConstructor;
+
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/users/me/activity")
@@ -20,11 +25,37 @@ public class MyPageActivityController {
             @RequestParam(defaultValue = "49") int days
     ) {
         if (currentUserId == null) {
-            return ResponseEntity.status(401).build();
+            return ResponseEntity
+                    .status(401)
+                    .build();
         }
 
         return ResponseEntity.ok(
-                myPageActivityService.getMyActivityHeatmap(currentUserId, days)
+                myPageActivityService
+                        .getMyActivityHeatmap(
+                                currentUserId,
+                                days
+                        )
+        );
+    }
+
+    @GetMapping("/recent")
+    public ResponseEntity<List<RecentActivityResponse>> getMyRecentActivities(
+            @AuthenticationPrincipal Long currentUserId,
+            @RequestParam(defaultValue = "6") int limit
+    ) {
+        if (currentUserId == null) {
+            return ResponseEntity
+                    .status(401)
+                    .build();
+        }
+
+        return ResponseEntity.ok(
+                myPageActivityService
+                        .getMyRecentActivities(
+                                currentUserId,
+                                limit
+                        )
         );
     }
 }
