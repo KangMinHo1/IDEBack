@@ -19,7 +19,6 @@ public class Schedule {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    // 프론트와 API에서 사용할 공개 식별자
     @Column(nullable = false, unique = true, updatable = false, length = 36)
     private String uuid;
 
@@ -27,12 +26,10 @@ public class Schedule {
     @JoinColumn(name = "workspace_uuid", nullable = false)
     private Workspace workspace;
 
-    // 일정 생성자
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "created_by", nullable = false)
     private User createdBy;
 
-    // 실제 일정 담당자
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "assignee_user_id")
     private User assignee;
@@ -62,6 +59,15 @@ public class Schedule {
     @Column(nullable = false)
     private LocalDateTime updatedAt;
 
+    /*
+     * 일정이 실제 DONE 상태가 된 시각.
+     *
+     * updatedAt과 분리해야 이후 일정 내용을 수정해도
+     * "일정 완료" 활동 시간이 바뀌지 않는다.
+     */
+    @Column(name = "completed_at")
+    private LocalDateTime completedAt;
+
     @Builder
     private Schedule(
             Workspace workspace,
@@ -78,22 +84,33 @@ public class Schedule {
         this.workspace = workspace;
         this.createdBy = createdBy;
 
-        // 담당자가 따로 없으면 생성자가 담당자
-        this.assignee = assignee != null ? assignee : createdBy;
+        this.assignee =
+                assignee != null
+                        ? assignee
+                        : createdBy;
 
         this.title = title;
         this.description = description;
         this.startDate = startDate;
         this.endDate = endDate;
-        this.status = status == null ? ScheduleStatus.TODO : status;
+
+        this.status =
+                status == null
+                        ? ScheduleStatus.TODO
+                        : status;
+
         this.category =
                 category == null || category.isBlank()
                         ? "General"
                         : category;
+
+        if (this.status == ScheduleStatus.DONE) {
+            this.completedAt = LocalDateTime.now();
+        }
     }
 
     public void updateStatus(ScheduleStatus status) {
-        this.status = status;
+        applyStatus(status);
     }
 
     public void updatePeriod(
@@ -121,7 +138,9 @@ public class Schedule {
         this.description = description;
         this.startDate = startDate;
         this.endDate = endDate;
-        this.status = status;
+
+        applyStatus(status);
+
         this.category =
                 category == null || category.isBlank()
                         ? "General"
@@ -132,25 +151,74 @@ public class Schedule {
         }
     }
 
+    /*
+     * DONE으로 처음 변경된 순간만 completedAt 기록.
+     *
+     * DONE -> DONE
+     *   completedAt 유지
+     *
+     * TODO/IN_PROGRESS -> DONE
+     *   현재 시간 저장
+     *
+     * DONE -> TODO/IN_PROGRESS
+     *   완료 취소이므로 completedAt 제거
+     */
+    private void applyStatus(ScheduleStatus nextStatus) {
+        if (nextStatus == null) {
+            return;
+        }
+
+        ScheduleStatus previousStatus =
+                this.status;
+
+        if (
+                nextStatus == ScheduleStatus.DONE
+                        && previousStatus != ScheduleStatus.DONE
+        ) {
+            this.completedAt =
+                    LocalDateTime.now();
+        }
+
+        if (nextStatus != ScheduleStatus.DONE) {
+            this.completedAt = null;
+        }
+
+        this.status = nextStatus;
+    }
+
     @PrePersist
     public void prePersist() {
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now =
+                LocalDateTime.now();
 
         this.createdAt = now;
         this.updatedAt = now;
 
         if (this.uuid == null) {
-            this.uuid = UUID.randomUUID().toString();
+            this.uuid =
+                    UUID.randomUUID().toString();
         }
 
-        // 혹시 서비스에서 누락돼도 생성자를 기본 담당자로
         if (this.assignee == null) {
-            this.assignee = this.createdBy;
+            this.assignee =
+                    this.createdBy;
+        }
+
+        /*
+         * 혹시 생성 단계에서 DONE 상태인데
+         * completedAt이 비어 있다면 보정.
+         */
+        if (
+                this.status == ScheduleStatus.DONE
+                        && this.completedAt == null
+        ) {
+            this.completedAt = now;
         }
     }
 
     @PreUpdate
     public void preUpdate() {
-        this.updatedAt = LocalDateTime.now();
+        this.updatedAt =
+                LocalDateTime.now();
     }
 }

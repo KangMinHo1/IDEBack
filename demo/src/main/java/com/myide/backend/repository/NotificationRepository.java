@@ -2,18 +2,30 @@ package com.myide.backend.repository;
 
 import com.myide.backend.domain.notification.Notification;
 import com.myide.backend.domain.notification.NotificationType;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+
+import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
 
-public interface NotificationRepository extends JpaRepository<Notification, Long> {
+public interface NotificationRepository
+        extends JpaRepository<Notification, Long> {
 
-    long countByReceiver_IdAndReadFalse(Long receiverId);
+    long countByReceiver_IdAndReadFalse(
+            Long receiverId
+    );
 
-    Optional<Notification> findByIdAndReceiver_Id(Long id, Long receiverId);
+    Optional<Notification> findByIdAndReceiver_Id(
+            Long id,
+            Long receiverId
+    );
 
     Page<Notification> findByReceiver_IdOrderByCreatedAtDesc(
             Long receiverId,
@@ -69,5 +81,20 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
             LocalDateTime from,
             LocalDateTime to,
             Pageable pageable
+    );
+
+    /*
+     * Workspace 삭제용
+     */
+    @Modifying(
+            clearAutomatically = true,
+            flushAutomatically = true
+    )
+    @Query("""
+        DELETE FROM Notification n
+        WHERE n.workspace.uuid = :workspaceUuid
+    """)
+    void deleteAllByWorkspaceUuid(
+            @Param("workspaceUuid") String workspaceUuid
     );
 }
