@@ -71,6 +71,31 @@ public final class Traceability {
         return new ArrayList<>(labels);
     }
 
+    /**
+     * 표 하나에 닿는 요구사항의 id.
+     *
+     * 라벨(사람이 읽는 글자)과 달리 id 는 미리보기에서 파일을 기능별로 묶는 열쇠로 쓴다.
+     * 라벨은 이름이 바뀌면 같이 바뀌고 같은 이름이 둘일 수도 있어서 묶음 기준이 못 된다.
+     */
+    public static List<String> requirementIdsForTable(DesignModelV2 model, String tableId) {
+        Set<String> ids = new LinkedHashSet<>();
+
+        for (ApiSpecV2 api : model.apis()) {
+            if (api.tableIds().contains(tableId)) {
+                ids.addAll(api.requirementIds());
+            }
+        }
+
+        return new ArrayList<>(ids);
+    }
+
+    /** API 여러 개가 걸려 있는 요구사항 id 를 겹치지 않게 모은다. */
+    public static List<String> requirementIdsOfApis(List<ApiSpecV2> apis) {
+        Set<String> ids = new LinkedHashSet<>();
+        apis.forEach(api -> ids.addAll(api.requirementIds()));
+        return new ArrayList<>(ids);
+    }
+
     /** API 를 부르는 화면 이름들. 컨트롤러 주석에 "어디서 쓰는지"를 남긴다. */
     public static List<String> screenLabels(DesignModelV2 model, ApiSpecV2 api) {
         List<String> labels = new ArrayList<>();

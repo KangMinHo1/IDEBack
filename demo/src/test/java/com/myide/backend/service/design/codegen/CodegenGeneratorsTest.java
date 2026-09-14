@@ -10,6 +10,7 @@ import com.myide.backend.service.design.codegen.spring.DdlGenerator;
 import com.myide.backend.service.design.codegen.spring.SpringControllerDtoGenerator;
 import com.myide.backend.service.design.codegen.spring.SpringEntityGenerator;
 import com.myide.backend.service.design.codegen.spring.SpringRepositoryGenerator;
+import com.myide.backend.service.design.codegen.spring.SpringServiceGenerator;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -115,7 +116,38 @@ class CodegenGeneratorsTest {
         assertThat(userController).contains("@RequestBody CreateUsersLoginRequest request");
 
         assertThat(postController).contains("@GetMapping(\"/api/posts/{postId}\")");
-        assertThat(postController).contains("@PathVariable(\"postId\") String postId");
+        // 표준 CRUD 로 인식되면 경로 변수 타입도 표의 기본키를 따른다.
+        assertThat(postController).contains("@PathVariable(\"postId\") Long postId");
+    }
+
+    @Test
+    @DisplayName("표준 CRUD 는 몸통까지 만들고, 그 밖은 스텁으로 둔다")
+    void standardCrudGetsRealBody() {
+        List<GeneratedFile> files = new SpringControllerDtoGenerator(new ObjectMapper())
+                .generate(model, options);
+
+        String postController = contentOf(files, "PostController.java");
+
+        // GET /api/posts/{postId} 는 표준 조회다. 서비스를 부르고 몸통이 채워진다.
+        assertThat(postController).contains("private final PostService postService;");
+        assertThat(postController).contains("postService.findById(postId)");
+
+        // POST /api/posts/{postId}/like 는 동작이라 기계가 무엇을 할지 알 수 없다.
+        assertThat(postController).contains("UnsupportedOperationException");
+    }
+
+    @Test
+    @DisplayName("표준 CRUD 가 있는 표에는 서비스가 생긴다")
+    void serviceIsGeneratedForStandardCrud() {
+        List<GeneratedFile> files = new SpringServiceGenerator().generate(model, options);
+
+        String service = contentOf(files, "PostService.java");
+
+        assertThat(service).contains("public Post findById(Long id)");
+        assertThat(service).contains("postRepository.findById(id)");
+
+        // 설계에 없는 CRUD 는 만들지 않는다. 쓰지 않는 코드가 남으면 안 된다.
+        assertThat(service).doesNotContain("public void delete(");
     }
 
     @Test

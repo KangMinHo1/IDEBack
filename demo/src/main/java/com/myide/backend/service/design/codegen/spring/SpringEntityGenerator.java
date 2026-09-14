@@ -53,7 +53,10 @@ public class SpringEntityGenerator implements DesignCodeGenerator {
                     path,
                     render(model, table, tableById, entityName, options),
                     CodegenTarget.SPRING_ENTITY,
-                    "테이블 " + table.name()));
+                    "테이블 " + table.name(),
+                    Traceability.requirementIdsForTable(model, table.id()),
+                    Traceability.requirementLabels(model,
+                            Traceability.requirementIdsForTable(model, table.id()))));
         }
 
         return files;

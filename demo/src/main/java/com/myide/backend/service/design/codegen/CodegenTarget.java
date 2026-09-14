@@ -8,8 +8,13 @@ package com.myide.backend.service.design.codegen;
  */
 public enum CodegenTarget {
 
+    /*
+     * 선언 순서가 곧 생성 순서이자 미리보기의 계층별 표시 순서다.
+     * 서비스는 리포지토리를 쓰고 컨트롤러가 서비스를 쓰므로 그 사이에 둔다.
+     */
     SPRING_ENTITY(ProjectStack.SPRING, "Entity"),
     SPRING_REPOSITORY(ProjectStack.SPRING, "Repository"),
+    SPRING_SERVICE(ProjectStack.SPRING, "Service"),
     SPRING_CONTROLLER_DTO(ProjectStack.SPRING, "Controller / DTO"),
     DDL(ProjectStack.SPRING, "테이블 생성 SQL"),
 

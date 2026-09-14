@@ -55,7 +55,7 @@ public class ReactApiClientGenerator implements DesignCodeGenerator {
             builder.append(renderFunction(model, api, name));
         }
 
-        return List.of(new GeneratedFile(
+        return List.of(GeneratedFile.shared(
                 "src/api/designApi.js",
                 builder.toString(),
                 CodegenTarget.REACT_API_CLIENT,

@@ -57,7 +57,7 @@ public class DdlGenerator implements DesignCodeGenerator {
             builder.append(constraints);
         }
 
-        return List.of(new GeneratedFile(
+        return List.of(GeneratedFile.shared(
                 "src/main/resources/design-schema.sql",
                 builder.toString(),
                 CodegenTarget.DDL,

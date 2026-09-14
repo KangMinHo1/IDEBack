@@ -81,13 +81,22 @@ final class CodegenFixtures {
                 "글 하나를 가져온다", "", "설명만 적혀 있고 JSON 이 아니다",
                 true, "R", List.of("req_2"), List.of("scr_detail"), List.of("tbl_post"));
 
+        /*
+         * 표준 CRUD 가 아닌 API. 끝이 경로 변수가 아니라 동작 이름(like)이다.
+         * 이런 것은 몸통을 만들지 않고 스텁으로 두어야 하며, 예시가 JSON 이 아닐 때
+         * Map 으로 물러서는 길도 이 API 가 지킨다.
+         */
+        ApiSpecV2 likeApi = new ApiSpecV2("api_like", "POST", "/api/posts/{postId}/like",
+                "글에 좋아요를 누른다", "", "좋아요 수를 돌려준다. JSON 이 아니다",
+                true, "U", List.of("req_2"), List.of("scr_detail"), List.of("tbl_post"));
+
         return new DesignModelV2(2,
                 new DesignMetaV2("작은 게시판",
                         new TechStackV2("Spring Boot", "React", "MySQL"), null),
                 List.of(login, read),
                 List.of(loginScreen, detailScreen),
                 List.of(transition),
-                List.of(loginApi, postApi),
+                List.of(loginApi, postApi, likeApi),
                 new ErdV2(List.of(users, posts), List.of(relation)));
     }
 }

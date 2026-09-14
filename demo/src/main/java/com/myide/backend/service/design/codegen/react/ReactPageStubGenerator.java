@@ -54,7 +54,9 @@ public class ReactPageStubGenerator implements DesignCodeGenerator {
                     ReactNames.pagePath(component),
                     render(model, screen, component, screenById, apiById, functionNames),
                     CodegenTarget.REACT_PAGE,
-                    "화면 " + screen.name()));
+                    "화면 " + screen.name(),
+                    screen.requirementIds(),
+                    Traceability.requirementLabels(model, screen.requirementIds())));
         }
 
         return files;

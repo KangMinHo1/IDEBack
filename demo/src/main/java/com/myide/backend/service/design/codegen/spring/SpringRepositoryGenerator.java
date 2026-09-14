@@ -9,6 +9,7 @@ import com.myide.backend.service.design.codegen.CodegenOptions;
 import com.myide.backend.service.design.codegen.CodegenTarget;
 import com.myide.backend.service.design.codegen.DesignCodeGenerator;
 import com.myide.backend.service.design.codegen.NameMapper;
+import com.myide.backend.service.design.codegen.Traceability;
 import com.myide.backend.service.design.codegen.TypeMapper;
 import org.springframework.stereotype.Component;
 
@@ -52,7 +53,10 @@ public class SpringRepositoryGenerator implements DesignCodeGenerator {
                     path,
                     render(model, table, tableById, entityName, options),
                     CodegenTarget.SPRING_REPOSITORY,
-                    "테이블 " + table.name()));
+                    "테이블 " + table.name(),
+                    Traceability.requirementIdsForTable(model, table.id()),
+                    Traceability.requirementLabels(model,
+                            Traceability.requirementIdsForTable(model, table.id()))));
         }
 
         return files;

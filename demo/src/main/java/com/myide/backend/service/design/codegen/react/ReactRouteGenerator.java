@@ -90,7 +90,7 @@ public class ReactRouteGenerator implements DesignCodeGenerator {
         builder.append("  );\n");
         builder.append("}\n");
 
-        return List.of(new GeneratedFile(
+        return List.of(GeneratedFile.shared(
                 "src/routes/AppRoutes.jsx",
                 builder.toString(),
                 CodegenTarget.REACT_ROUTE,

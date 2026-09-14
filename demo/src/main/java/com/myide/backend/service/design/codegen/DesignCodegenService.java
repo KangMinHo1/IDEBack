@@ -115,7 +115,8 @@ public class DesignCodegenService {
             views.add(new CodegenFileView(
                     file.path(), file.content(), status,
                     hash(existing), existing == null ? "" : existing,
-                    file.target().name(), file.target().label(), file.sourceLabel()));
+                    file.target().name(), file.target().label(), file.sourceLabel(),
+                    file.requirementIds(), file.requirementLabels(), file.needsHandWork()));
         }
 
         return new CodegenPreviewResponse(
