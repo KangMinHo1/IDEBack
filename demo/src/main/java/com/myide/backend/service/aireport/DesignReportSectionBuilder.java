@@ -270,6 +270,15 @@ public class DesignReportSectionBuilder {
         DoctorReport report = doctorService.inspect(model);
 
         StringBuilder builder = new StringBuilder();
+
+        // 진행률은 화면(설계 점검 패널)이 보여 주는 것과 같은 값이어야 한다.
+        // 그래서 여기서 따로 세지 않고 점검 결과에 실려 온 것을 그대로 쓴다.
+        builder.append("설계 진행률 ").append(report.progress().percent()).append("%")
+                .append(" (요구사항 ").append(report.progress().requirements().percent()).append("%")
+                .append(", 화면 ").append(report.progress().screens().percent()).append("%")
+                .append(", API ").append(report.progress().apis().percent()).append("%")
+                .append(", 테이블 ").append(report.progress().tables().percent()).append("%)\n");
+
         builder.append("오류 ").append(report.errorCount()).append("건, 경고 ")
                 .append(report.warningCount()).append("건, 참고 ")
                 .append(report.infoCount()).append("건\n");

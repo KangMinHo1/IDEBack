@@ -47,7 +47,8 @@ public class DesignDoctorService {
                 (int) errors,
                 (int) warnings,
                 (int) infos,
-                errors > 0
+                errors > 0,
+                DesignProgress.measure(safe, index)
         );
     }
 }
