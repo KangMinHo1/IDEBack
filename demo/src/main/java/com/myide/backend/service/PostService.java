@@ -6,6 +6,8 @@ import com.myide.backend.repository.post.CommentRepository;
 import com.myide.backend.repository.post.LikeRepository;
 import com.myide.backend.repository.post.PostRepository;
 import com.myide.backend.repository.post.ScrapRepository;
+import com.myide.backend.repository.report.ReportRepository;
+
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -26,6 +28,7 @@ public class PostService {
     private final LikeRepository likeRepository;
     private final ScrapRepository scrapRepository;
     private final CommentRepository commentRepository;
+    private final ReportRepository reportRepository;
 
     // 💡 [핵심] 인메모리 캐시 장부 (키: "게시글ID_식별자", 값: 마지막 조회 시간 밀리초)
     private final ConcurrentHashMap<String, Long> viewCache = new ConcurrentHashMap<>();
@@ -187,17 +190,29 @@ public class PostService {
     // ==========================================
     @Transactional
     public void deletePost(Long postId, Long currentUserId) {
+
         Post post = postRepository.findById(postId)
-                .orElseThrow(() -> new EntityNotFoundException("게시글을 찾을 수 없습니다."));
+                .orElseThrow(() ->
+                        new EntityNotFoundException(
+                                "게시글을 찾을 수 없습니다."
+                        )
+                );
 
         if (!post.getAuthorId().equals(currentUserId)) {
-            throw new IllegalArgumentException("삭제 권한이 없습니다.");
+            throw new IllegalArgumentException(
+                    "삭제 권한이 없습니다."
+            );
         }
 
+        // 게시글에 연결된 데이터 먼저 삭제
         commentRepository.deleteByPostId(postId);
         likeRepository.deleteByPostId(postId);
         scrapRepository.deleteByPostId(postId);
 
+        // 신고 데이터도 먼저 삭제
+        reportRepository.deleteByPost_Id(postId);
+
+        // 마지막으로 게시글 삭제
         postRepository.delete(post);
     }
 
