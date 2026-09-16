@@ -39,6 +39,11 @@ public class User {
     @Column(length = 100)
     private String githubUsername;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    @Builder.Default
+    private UserRole role = UserRole.USER;
+
     @Column(nullable = false, updatable = false)
     @Builder.Default
     private LocalDateTime createdAt = LocalDateTime.now();
