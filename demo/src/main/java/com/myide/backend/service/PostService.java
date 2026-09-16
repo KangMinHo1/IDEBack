@@ -1,23 +1,19 @@
 package com.myide.backend.service;
 
-import com.myide.backend.domain.post.*;
+import com.myide.backend.domain.User;
+import com.myide.backend.domain.post.Post;
 import com.myide.backend.dto.PostDto;
-import com.myide.backend.repository.post.CommentRepository;
-import com.myide.backend.repository.post.LikeRepository;
+import com.myide.backend.repository.UserRepository;
 import com.myide.backend.repository.post.PostRepository;
-import com.myide.backend.repository.post.ScrapRepository;
-import com.myide.backend.repository.report.ReportRepository;
-
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
-import jakarta.persistence.EntityNotFoundException;
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -25,284 +21,528 @@ import java.util.stream.Collectors;
 public class PostService {
 
     private final PostRepository postRepository;
-    private final LikeRepository likeRepository;
-    private final ScrapRepository scrapRepository;
-    private final CommentRepository commentRepository;
-    private final ReportRepository reportRepository;
+    private final UserRepository userRepository;
 
-    // 💡 [핵심] 인메모리 캐시 장부 (키: "게시글ID_식별자", 값: 마지막 조회 시간 밀리초)
-    private final ConcurrentHashMap<String, Long> viewCache = new ConcurrentHashMap<>();
-
-    // 💡 더블 렌더링 및 악성 F5 방지용 쿨타임 (5초)
-    private static final long VIEW_COOLDOWN_MS = 5000;
 
     // ==========================================
-    // 1. 게시글 목록 조회
+    // 게시글 목록
     // ==========================================
-    public Page<PostDto.ListResponse> getPosts(String category, String keyword, Pageable pageable) {
-        Page<Post> posts = postRepository.searchPosts(category, keyword, pageable);
 
-        return posts.map(post -> {
-            String snippet = post.getContent().length() > 100
-                    ? post.getContent().substring(0, 100) + "..."
-                    : post.getContent();
+    public Page<PostDto.ListResponse> getPosts(
+            String keyword,
+            String category,
+            int page,
+            int size
+    ) {
 
-            String previewImg = post.getAttachments().stream()
-                    .filter(a -> "image".equals(a.getType()))
-                    .findFirst()
-                    .map(Attachment::getUrl)
-                    .orElse(null);
-
-            return PostDto.ListResponse.builder()
-                    .id(post.getId())
-                    .title(post.getTitle())
-                    .contentSnippet(snippet)
-                    .category(post.getCategory())
-                    .tags(post.getTags())
-                    .authorId(post.getAuthorId())
-                    .authorName(post.getAuthorName())
-                    .views(post.getViews())
-                    .likeCount(post.getLikeCount())
-                    .scrapCount(post.getScrapCount())
-                    .previewImageUrl(previewImg)
-                    .createdAt(post.getCreatedAt())
-                    .build();
-        });
-    }
-
-    // ==========================================
-    // 2. 게시글 상세 조회 (인메모리 캐시 적용)
-    // 💡 파라미터가 (Long, Long, String) 으로 일치하게 수정됨!
-    // ==========================================
-    @Transactional
-    public PostDto.DetailResponse getPostDetail(Long postId, Long currentUserId, String clientIp) {
-
-        // 1) 유저 식별키 생성 (로그인 유저는 ID 우선, 비로그인은 IP)
-        String userIdentifier = (currentUserId != null) ? "USER_" + currentUserId : "IP_" + clientIp;
-        String cacheKey = postId + "_" + userIdentifier;
-
-        long currentTime = System.currentTimeMillis();
-        Long lastViewTime = viewCache.get(cacheKey);
-
-        // 2) 조건: 장부에 없거나, 마지막으로 읽은 지 5초가 지났을 때만 DB 조회수 증가
-        if (lastViewTime == null || (currentTime - lastViewTime) > VIEW_COOLDOWN_MS) {
-            postRepository.incrementViews(postId);
-            viewCache.put(cacheKey, currentTime); // 장부 갱신
+        // 잘못된 페이지 값 방지
+        if (page < 0) {
+            page = 0;
         }
 
-        // 3) 게시글 엔티티 조회
-        Post post = postRepository.findById(postId)
-                .orElseThrow(() -> new EntityNotFoundException("게시글을 찾을 수 없습니다."));
+        if (size <= 0) {
+            size = 20;
+        }
 
-        // 4) 첨부파일 변환
-        List<PostDto.AttachmentResponse> attachments = post.getAttachments().stream()
-                .map(a -> PostDto.AttachmentResponse.builder()
-                        .id(a.getId())
-                        .name(a.getName())
-                        .type(a.getType())
-                        .url(a.getUrl())
-                        .build())
-                .collect(Collectors.toList());
+        PageRequest pageable =
+                PageRequest.of(
+                        page,
+                        size
+                );
 
-        boolean isLiked = currentUserId != null && likeRepository.existsByPostIdAndUserId(postId, currentUserId);
-        boolean isScrapped = currentUserId != null && scrapRepository.existsByPostIdAndUserId(postId, currentUserId);
+        Page<Post> posts =
+                postRepository.searchBoard(
+                        normalize(keyword),
+                        normalize(category),
+                        pageable
+                );
+
+        return posts.map(this::toListResponse);
+    }
+
+
+    // ==========================================
+    // 게시글 상세
+    // ==========================================
+
+    @Transactional
+    public PostDto.DetailResponse getPost(
+            Long postId
+    ) {
+
+        Post post =
+                findPost(postId);
+
+        // 조회수 증가
+        post.increaseViewCount();
+
+        return toDetailResponse(post);
+    }
+
+
+    // ==========================================
+    // 일반 게시글 작성
+    // ==========================================
+
+    @Transactional
+    public PostDto.DetailResponse createPost(
+            PostDto.CreateRequest request,
+            Long currentUserId
+    ) {
+
+        // 로그인 확인
+        validateLogin(currentUserId);
+
+        // 입력값 확인
+        validateCreateRequest(request);
+
+        // 사용자 조회
+        User user =
+                userRepository.findById(currentUserId)
+                        .orElseThrow(() ->
+                                new ResponseStatusException(
+                                        HttpStatus.NOT_FOUND,
+                                        "사용자를 찾을 수 없습니다."
+                                )
+                        );
+
+        // 카테고리 정리
+        String category =
+                normalizeCategory(
+                        request.getCategory()
+                );
+
+        // 일반 게시글 생성
+        Post post =
+                Post.createNormalPost(
+                        user.getId(),
+                        user.getNickname(),
+                        request.getTitle().trim(),
+                        request.getContent().trim(),
+                        category
+                );
+
+        // 저장
+        Post savedPost =
+                postRepository.save(post);
+
+        return toDetailResponse(savedPost);
+    }
+
+
+    // ==========================================
+    // 일반 게시글 수정
+    // ==========================================
+
+    @Transactional
+    public PostDto.DetailResponse updatePost(
+            Long postId,
+            PostDto.UpdateRequest request,
+            Long currentUserId
+    ) {
+
+        // 로그인 확인
+        validateLogin(currentUserId);
+
+        // 입력값 확인
+        validateUpdateRequest(request);
+
+        // 게시글 조회
+        Post post =
+                findPost(postId);
+
+
+        // ======================================
+        // 공지는 일반 게시글 API에서 수정 불가
+        // ======================================
+
+        if (post.isNotice()) {
+
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "공지사항은 관리자만 수정할 수 있습니다."
+            );
+        }
+
+
+        // ======================================
+        // 작성자 본인 확인
+        // ======================================
+
+        if (!post.getAuthorId().equals(currentUserId)) {
+
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "본인이 작성한 게시글만 수정할 수 있습니다."
+            );
+        }
+
+
+        // 게시글 수정
+        post.update(
+                request.getTitle().trim(),
+                request.getContent().trim(),
+                normalizeCategory(
+                        request.getCategory()
+                )
+        );
+
+        /*
+         * @Transactional 상태이기 때문에
+         * JPA Dirty Checking으로 DB에 자동 반영된다.
+         */
+
+        return toDetailResponse(post);
+    }
+
+
+    // ==========================================
+    // 일반 게시글 삭제
+    // ==========================================
+
+    @Transactional
+    public void deletePost(
+            Long postId,
+            Long currentUserId
+    ) {
+
+        // 로그인 확인
+        validateLogin(currentUserId);
+
+        // 게시글 조회
+        Post post =
+                findPost(postId);
+
+
+        // ======================================
+        // 일반 API에서 공지 삭제 방지
+        // ======================================
+
+        if (post.isNotice()) {
+
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "공지사항은 관리자만 삭제할 수 있습니다."
+            );
+        }
+
+
+        // ======================================
+        // 작성자 본인 확인
+        // ======================================
+
+        if (!post.getAuthorId().equals(currentUserId)) {
+
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "본인이 작성한 게시글만 삭제할 수 있습니다."
+            );
+        }
+
+
+        postRepository.delete(post);
+    }
+
+
+    // ==========================================
+    // Post 조회
+    // ==========================================
+
+    private Post findPost(
+            Long postId
+    ) {
+
+        return postRepository.findById(postId)
+                .orElseThrow(() ->
+                        new ResponseStatusException(
+                                HttpStatus.NOT_FOUND,
+                                "게시글을 찾을 수 없습니다."
+                        )
+                );
+    }
+
+
+    // ==========================================
+    // 로그인 검사
+    // ==========================================
+
+    private void validateLogin(
+            Long currentUserId
+    ) {
+
+        if (currentUserId == null) {
+
+            throw new ResponseStatusException(
+                    HttpStatus.UNAUTHORIZED,
+                    "로그인이 필요합니다."
+            );
+        }
+    }
+
+
+    // ==========================================
+    // 작성 요청 검사
+    // ==========================================
+
+    private void validateCreateRequest(
+            PostDto.CreateRequest request
+    ) {
+
+        if (request == null) {
+
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "게시글 정보를 입력해주세요."
+            );
+        }
+
+        validateTitleAndContent(
+                request.getTitle(),
+                request.getContent()
+        );
+    }
+
+
+    // ==========================================
+    // 수정 요청 검사
+    // ==========================================
+
+    private void validateUpdateRequest(
+            PostDto.UpdateRequest request
+    ) {
+
+        if (request == null) {
+
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "수정할 정보를 입력해주세요."
+            );
+        }
+
+        validateTitleAndContent(
+                request.getTitle(),
+                request.getContent()
+        );
+    }
+
+
+    // ==========================================
+    // 제목 / 내용 검사
+    // ==========================================
+
+    private void validateTitleAndContent(
+            String title,
+            String content
+    ) {
+
+        // 제목 없음
+        if (title == null ||
+                title.trim().isEmpty()) {
+
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "제목을 입력해주세요."
+            );
+        }
+
+        // 제목 길이 초과
+        if (title.trim().length() > 200) {
+
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "제목은 200자 이하로 입력해주세요."
+            );
+        }
+
+        // 내용 없음
+        if (content == null ||
+                content.trim().isEmpty()) {
+
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "내용을 입력해주세요."
+            );
+        }
+    }
+
+
+    // ==========================================
+    // 카테고리 기본값
+    // ==========================================
+
+    private String normalizeCategory(
+            String category
+    ) {
+
+        if (category == null ||
+                category.trim().isEmpty()) {
+
+            return "GENERAL";
+        }
+
+        return category.trim();
+    }
+
+
+    // ==========================================
+    // 검색 문자열 정리
+    // ==========================================
+
+    private String normalize(
+            String value
+    ) {
+
+        if (value == null) {
+            return null;
+        }
+
+        String result =
+                value.trim();
+
+        return result.isEmpty()
+                ? null
+                : result;
+    }
+
+
+    // ==========================================
+    // 게시글 목록 DTO 변환
+    // ==========================================
+
+    private PostDto.ListResponse toListResponse(
+            Post post
+    ) {
+
+        // 작성자 이름 조회
+        String authorName =
+                userRepository
+                        .findById(
+                                post.getAuthorId()
+                        )
+                        .map(User::getNickname)
+                        .orElse("알 수 없음");
+
+
+        // ======================================
+        // 목록 미리보기 내용 생성
+        // ======================================
+
+        String contentSnippet = "";
+
+        if (post.getContent() != null) {
+
+            String content =
+                    post.getContent().trim();
+
+            if (content.length() > 100) {
+
+                contentSnippet =
+                        content.substring(
+                                0,
+                                100
+                        ) + "...";
+
+            } else {
+
+                contentSnippet =
+                        content;
+            }
+        }
+
+
+        return PostDto.ListResponse.builder()
+                .id(post.getId())
+                .title(post.getTitle())
+                .contentSnippet(contentSnippet)
+                .category(post.getCategory())
+
+                // NORMAL / NOTICE
+                .postType(post.getPostType())
+
+                /*
+                 * 현재 Post 엔티티에 태그 연관관계가 연결되지 않은
+                 * 공지 추가용 구조이므로 빈 배열 반환.
+                 *
+                 * 기존 태그 Service를 다시 연결할 경우
+                 * 이 부분만 실제 태그 목록으로 바꾸면 됨.
+                 */
+                .tags(List.of())
+
+                .authorId(post.getAuthorId())
+                .authorName(authorName)
+
+                // DTO 필드 이름은 views
+                .views((int) post.getViewCount())
+
+                /*
+                 * 현재 이 PostService 구조에는
+                 * 좋아요 / 스크랩 Repository가 연결되어 있지 않으므로
+                 * 우선 0 반환.
+                 */
+                .likeCount(0)
+                .scrapCount(0)
+
+                // 목록 썸네일
+                .previewImageUrl(null)
+
+                .createdAt(post.getCreatedAt())
+                .build();
+    }
+
+
+    // ==========================================
+    // 게시글 상세 DTO 변환
+    // ==========================================
+
+    private PostDto.DetailResponse toDetailResponse(
+            Post post
+    ) {
+
+        // 작성자 이름 조회
+        String authorName =
+                userRepository
+                        .findById(
+                                post.getAuthorId()
+                        )
+                        .map(User::getNickname)
+                        .orElse("알 수 없음");
+
 
         return PostDto.DetailResponse.builder()
                 .id(post.getId())
                 .title(post.getTitle())
                 .content(post.getContent())
                 .category(post.getCategory())
-                .tags(post.getTags())
+
+                // NORMAL / NOTICE
+                .postType(post.getPostType())
+
+                // 현재 태그 미연결
+                .tags(List.of())
+
                 .authorId(post.getAuthorId())
-                .authorName(post.getAuthorName())
-                // 💡 JPA가 영속성 컨텍스트에 캐시된 이전 뷰 카운트를 가져올 수 있으므로,
-                // 증가 로직이 수행되었다면 뷰 카운트를 +1 해서 반환해줍니다.
-                .views(lastViewTime == null || (currentTime - lastViewTime) > VIEW_COOLDOWN_MS ? post.getViews() + 1 : post.getViews())
-                .likeCount(post.getLikeCount())
-                .scrapCount(post.getScrapCount())
-                .liked(isLiked)
-                .scrapped(isScrapped)
+                .authorName(authorName)
+
+                // DTO에서는 views
+                .views((int) post.getViewCount())
+
+                // 현재 좋아요/스크랩 Repository 미연결
+                .likeCount(0)
+                .scrapCount(0)
+
+                /*
+                 * 로그인 사용자별 좋아요/스크랩 상태는
+                 * 현재 이 Service에서는 조회하지 않으므로 false.
+                 */
+                .liked(false)
+                .scrapped(false)
+
                 .createdAt(post.getCreatedAt())
                 .updatedAt(post.getUpdatedAt())
-                .attachments(attachments)
-                .build();
-    }
 
-    // ==========================================
-    // 3. 게시글 생성
-    // ==========================================
-    @Transactional
-    public Long createPost(PostDto.CreateRequest request, Long authorId, String authorName) {
-        Post post = Post.builder()
-                .title(request.getTitle())
-                .content(request.getContent())
-                .category(request.getCategory())
-                .tags(request.getTags())
-                .authorId(authorId)
-                .authorName(authorName)
-                .build();
+                // 현재 첨부파일 미연결
+                .attachments(List.of())
 
-        if (request.getAttachments() != null) {
-            for (PostDto.AttachmentRequest fileReq : request.getAttachments()) {
-                Attachment attachment = Attachment.builder()
-                        .post(post)
-                        .name(fileReq.getName())
-                        .type(fileReq.getType())
-                        .url(fileReq.getUrl())
-                        .build();
-                post.getAttachments().add(attachment);
-            }
-        }
-
-        return postRepository.save(post).getId();
-    }
-
-    // ==========================================
-    // 4. 게시글 수정
-    // ==========================================
-    @Transactional
-    public void updatePost(Long postId, PostDto.UpdateRequest request, Long currentUserId) {
-        Post post = postRepository.findById(postId)
-                .orElseThrow(() -> new EntityNotFoundException("게시글을 찾을 수 없습니다."));
-
-        if (!post.getAuthorId().equals(currentUserId)) {
-            throw new IllegalArgumentException("수정 권한이 없습니다.");
-        }
-
-        post.update(request.getTitle(), request.getContent(), request.getCategory(), request.getTags());
-
-        post.getAttachments().clear();
-        if (request.getAttachments() != null) {
-            for (PostDto.AttachmentRequest fileReq : request.getAttachments()) {
-                Attachment attachment = Attachment.builder()
-                        .post(post)
-                        .name(fileReq.getName())
-                        .type(fileReq.getType())
-                        .url(fileReq.getUrl())
-                        .build();
-                post.getAttachments().add(attachment);
-            }
-        }
-    }
-
-    // ==========================================
-    // 5. 게시글 삭제
-    // ==========================================
-    @Transactional
-    public void deletePost(Long postId, Long currentUserId) {
-
-        Post post = postRepository.findById(postId)
-                .orElseThrow(() ->
-                        new EntityNotFoundException(
-                                "게시글을 찾을 수 없습니다."
-                        )
-                );
-
-        if (!post.getAuthorId().equals(currentUserId)) {
-            throw new IllegalArgumentException(
-                    "삭제 권한이 없습니다."
-            );
-        }
-
-        // 게시글에 연결된 데이터 먼저 삭제
-        commentRepository.deleteByPostId(postId);
-        likeRepository.deleteByPostId(postId);
-        scrapRepository.deleteByPostId(postId);
-
-        // 신고 데이터도 먼저 삭제
-        reportRepository.deleteByPost_Id(postId);
-
-        // 마지막으로 게시글 삭제
-        postRepository.delete(post);
-    }
-
-    // ==========================================
-    // 6. 좋아요 토글
-    // ==========================================
-    @Transactional
-    public PostDto.InteractionResponse toggleLike(Long postId, Long currentUserId) {
-        Post post = postRepository.findById(postId)
-                .orElseThrow(() -> new EntityNotFoundException("게시글을 찾을 수 없습니다."));
-
-        boolean isLiked = likeRepository.existsByPostIdAndUserId(postId, currentUserId);
-
-        if (isLiked) {
-            likeRepository.deleteByPostIdAndUserId(postId, currentUserId);
-            post.decreaseLikeCount();
-        } else {
-            likeRepository.save(PostLike.builder().post(post).userId(currentUserId).build());
-            post.increaseLikeCount();
-        }
-
-        return PostDto.InteractionResponse.builder()
-                .active(!isLiked)
-                .count(post.getLikeCount())
-                .build();
-    }
-
-    // ==========================================
-    // 7. 스크랩 토글
-    // ==========================================
-    @Transactional
-    public PostDto.InteractionResponse toggleScrap(Long postId, Long currentUserId) {
-        Post post = postRepository.findById(postId)
-                .orElseThrow(() -> new EntityNotFoundException("게시글을 찾을 수 없습니다."));
-
-        boolean isScrapped = scrapRepository.existsByPostIdAndUserId(postId, currentUserId);
-
-        if (isScrapped) {
-            scrapRepository.deleteByPostIdAndUserId(postId, currentUserId);
-            post.decreaseScrapCount();
-        } else {
-            scrapRepository.save(PostScrap.builder().post(post).userId(currentUserId).build());
-            post.increaseScrapCount();
-        }
-
-        return PostDto.InteractionResponse.builder()
-                .active(!isScrapped)
-                .count(post.getScrapCount())
-                .build();
-    }
-
-    // ==========================================
-    // 8. 댓글 목록 조회
-    // ==========================================
-    public Page<PostDto.CommentResponse> getComments(Long postId, Pageable pageable) {
-        Page<Comment> comments = commentRepository.findByPostIdOrderByCreatedAtAsc(postId, pageable);
-        return comments.map(c -> PostDto.CommentResponse.builder()
-                .id(c.getId())
-                .postId(c.getPost().getId())
-                .content(c.getContent())
-                .authorId(c.getAuthorId())
-                .authorName(c.getAuthorName())
-                .createdAt(c.getCreatedAt())
-                .build());
-    }
-
-    // ==========================================
-    // 9. 댓글 작성
-    // ==========================================
-    @Transactional
-    public PostDto.CommentResponse createComment(Long postId, PostDto.CommentRequest request, Long authorId, String authorName) {
-        Post post = postRepository.findById(postId)
-                .orElseThrow(() -> new EntityNotFoundException("게시글을 찾을 수 없습니다."));
-
-        Comment comment = Comment.builder()
-                .post(post)
-                .content(request.getContent())
-                .authorId(authorId)
-                .authorName(authorName)
-                .build();
-
-        Comment savedComment = commentRepository.save(comment);
-
-        return PostDto.CommentResponse.builder()
-                .id(savedComment.getId())
-                .postId(post.getId())
-                .content(savedComment.getContent())
-                .authorId(savedComment.getAuthorId())
-                .authorName(savedComment.getAuthorName())
-                .createdAt(savedComment.getCreatedAt())
                 .build();
     }
 }
