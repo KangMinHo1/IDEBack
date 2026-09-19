@@ -1,127 +1,62 @@
 package com.myide.backend.security;
-
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.messaging.Message;
-import org.springframework.messaging.MessageChannel;
-import org.springframework.messaging.simp.stomp.StompCommand;
-import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
-import org.springframework.messaging.support.ChannelInterceptor;
-import org.springframework.messaging.support.MessageHeaderAccessor;
+import org.springframework.messaging.*;
+import org.springframework.messaging.simp.stomp.*;
+import org.springframework.messaging.support.*;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
-
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-@Slf4j
 @Component
 @RequiredArgsConstructor
 public class WebSocketAuthChannelInterceptor implements ChannelInterceptor {
-
-    public static final String AUTH_USER_ID = "AUTH_USER_ID";
-
+    public static final String AUTH_USER_ID="AUTH_USER_ID";
     private final JwtProvider jwtProvider;
     private final WebSocketSessionAuthRegistry sessionAuthRegistry;
-
-    @Override
-    public Message<?> preSend(Message<?> message, MessageChannel channel) {
-        StompHeaderAccessor accessor =
-                MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
-
-        if (accessor == null || accessor.getCommand() == null) {
-            return message;
+    private AccessDeniedException denied() { return new AccessDeniedException("메시지 연결 권한이 없습니다."); }
+    @Override public Message<?> preSend(Message<?> message,MessageChannel channel) {
+        StompHeaderAccessor a=MessageHeaderAccessor.getAccessor(message,StompHeaderAccessor.class);
+        if(a==null || a.getCommand()==null) return message;
+        boolean dmOnly=a.getSessionAttributes()!=null && Boolean.TRUE.equals(a.getSessionAttributes().get("DM_ONLY"));
+        if(a.getCommand()==StompCommand.CONNECT) {
+            String token=token(a);
+            if(!StringUtils.hasText(token)) {
+                if(dmOnly) throw denied();
+                return message; // 기존 팀 채팅/영상/Presence의 무토큰 연결은 이번 변경에서 유지합니다.
+            }
+            Long userId;
+            try {
+                if(!jwtProvider.validateAccessToken(token)) throw denied();
+                userId=jwtProvider.getUserIdFromToken(token);
+                if(userId==null) throw denied();
+            } catch(RuntimeException e) { throw denied(); }
+            Map<String,Object> attrs=a.getSessionAttributes();
+            if(attrs==null) { attrs=new ConcurrentHashMap<>(); a.setSessionAttributes(attrs); }
+            attrs.put(AUTH_USER_ID,userId);
+            a.setUser(()->String.valueOf(userId));
+            sessionAuthRegistry.register(a.getSessionId(),userId);
         }
-
-        if (StompCommand.CONNECT.equals(accessor.getCommand())) {
-            handleConnect(accessor);
+        String destination=a.getDestination();
+        if(a.getCommand()==StompCommand.SUBSCRIBE || a.getCommand()==StompCommand.SEND) {
+            // 다른 연결에서도 내부 DM 큐를 직접 구독하거나 위조 이벤트를 발행할 수 없습니다.
+            boolean mentionsDm=destination!=null && (destination.contains("/queue/dm") ||
+                    (destination.startsWith("/queue/") && (destination.contains("*") || destination.contains("{"))));
+            if(mentionsDm || dmOnly) {
+                if(a.getCommand()!=StompCommand.SUBSCRIBE || !"/user/queue/dm".equals(destination) || a.getUser()==null)
+                    throw denied();
+            }
+            if(a.getCommand()==StompCommand.SEND && destination!=null && destination.startsWith("/user/")) throw denied();
         }
-
-        if (StompCommand.DISCONNECT.equals(accessor.getCommand())) {
-            handleDisconnect(accessor);
-        }
-
+        if(a.getCommand()==StompCommand.DISCONNECT) sessionAuthRegistry.remove(a.getSessionId());
         return message;
     }
-
-    private void handleConnect(StompHeaderAccessor accessor) {
-        String sessionId = accessor.getSessionId();
-        String token = resolveToken(accessor);
-
-        if (!StringUtils.hasText(token)) {
-            log.warn("[WebSocket Auth] Authorization header is missing. sessionId={}", sessionId);
-            return;
+    private String token(StompHeaderAccessor a) {
+        for(String name:new String[]{"Authorization","authorization","accessToken","token"}) {
+            String value=a.getFirstNativeHeader(name);
+            if(StringUtils.hasText(value)) return value.startsWith("Bearer ")?value.substring(7).trim():value.trim();
         }
-
-        if (!jwtProvider.validateAccessToken(token)) {
-            log.warn("[WebSocket Auth] Invalid ACCESS token. sessionId={}", sessionId);
-            throw new AccessDeniedException("Invalid WebSocket access token.");
-        }
-
-        Long userId = jwtProvider.getUserIdFromToken(token);
-
-        Map<String, Object> sessionAttributes = accessor.getSessionAttributes();
-
-        if (sessionAttributes == null) {
-            sessionAttributes = new ConcurrentHashMap<>();
-            accessor.setSessionAttributes(sessionAttributes);
-        }
-
-        sessionAttributes.put(AUTH_USER_ID, userId);
-        accessor.setUser(() -> String.valueOf(userId));
-
-        sessionAuthRegistry.register(sessionId, userId);
-
-        log.info(
-                "[WebSocket Auth] STOMP CONNECT authenticated. sessionId={}, userId={}",
-                sessionId,
-                userId
-        );
-    }
-
-    private void handleDisconnect(StompHeaderAccessor accessor) {
-        String sessionId = accessor.getSessionId();
-
-        sessionAuthRegistry.remove(sessionId);
-
-        log.debug("[WebSocket Auth] STOMP DISCONNECT. sessionId={}", sessionId);
-    }
-
-    private String resolveToken(StompHeaderAccessor accessor) {
-        String token = firstNativeHeader(accessor, "Authorization");
-
-        if (!StringUtils.hasText(token)) {
-            token = firstNativeHeader(accessor, "authorization");
-        }
-
-        if (!StringUtils.hasText(token)) {
-            token = firstNativeHeader(accessor, "accessToken");
-        }
-
-        if (!StringUtils.hasText(token)) {
-            token = firstNativeHeader(accessor, "token");
-        }
-
-        if (!StringUtils.hasText(token)) {
-            return null;
-        }
-
-        if (token.startsWith("Bearer ")) {
-            return token.substring(7);
-        }
-
-        return token;
-    }
-
-    private String firstNativeHeader(StompHeaderAccessor accessor, String name) {
-        List<String> values = accessor.getNativeHeader(name);
-
-        if (values == null || values.isEmpty()) {
-            return null;
-        }
-
-        return values.get(0);
+        return null;
     }
 }
