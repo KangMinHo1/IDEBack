@@ -11,6 +11,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Locale;
 import java.util.Set;
+import org.springframework.beans.factory.annotation.Value;
 
 /*
  * 사용자마다 하나씩 주어지는 개인 폴더와, 그 폴더를 감싸는 "가상 경로"를 다룬다.
@@ -43,8 +44,10 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class UserSpaceService {
 
-    /* 개인 폴더들이 모여 사는 곳. 워크스페이스 기본 루트와 나란히 둔다. */
-    private static final String USERS_ROOT = "C:\\WebIDE\\users";
+    /* 개인 폴더들이 모여 사는 곳. 워크스페이스 기본 루트와 나란히 둔다.
+     * 로컬(Windows)과 배포 서버(Linux)의 실제 경로가 다르므로 환경변수로 분리한다. */
+    @Value("${ide.users-root}")
+    private String usersRoot;
 
     /* 사용자에게 보여 줄 가짜 최상위. 이 값이 바뀌면 프론트의 기본 경로도 함께 바꿔야 한다. */
     public static final String VIRTUAL_ROOT = "C:\\";
@@ -72,7 +75,7 @@ public class UserSpaceService {
             throw new ApiException(HttpStatus.UNAUTHORIZED, "로그인이 필요합니다.");
         }
 
-        Path root = Paths.get(USERS_ROOT, String.valueOf(userId))
+        Path root = Paths.get(usersRoot, String.valueOf(userId))
                 .toAbsolutePath()
                 .normalize();
 
