@@ -21,6 +21,7 @@ import com.myide.backend.service.analyzer.CodeAnalyzer;
 import com.myide.backend.service.design.codegen.GeneratedMarker;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -46,12 +47,24 @@ public class CodeMapService {
     private final ObjectMapper objectMapper;
     private final List<CodeAnalyzer> analyzers;
 
-    @Transactional
     public CodeMapResponse getAnalyzedCodeMap(String workspaceId, String projectName, String branchName) {
         return getAnalyzedCodeMap(workspaceId, projectName, branchName, "JAVA");
     }
 
-    @Transactional
+    /**
+     * 분석 결과를 캐시에서 주거나, 없으면 분석해서 캐시에 넣고 준다.
+     *
+     * 일부러 @Transactional 을 붙이지 않는다. 파일을 만들면 캐시가 지워지고, 그 직후
+     * 코드맵이 분석 요청을 여러 개 동시에 보내는 일이 흔하다. 요청들이 모두 캐시가
+     * 없다고 보고 같은 (워크스페이스, 프로젝트, 브랜치) 줄을 넣으려 하면 먼저 넣은
+     * 하나만 성공하고 나머지는 유니크 제약에 걸린다. 메서드 전체가 트랜잭션 하나였을
+     * 때는 그 실패를 아래 catch 로 잡아도 트랜잭션에 "되돌림" 표시가 이미 붙어 있어서,
+     * 끝날 때 "Transaction silently rolled back" 으로 요청 전체가 500 이 됐다.
+     * 분석 결과는 멀쩡한데도 코드맵이 안 뜬 것이다.
+     *
+     * 트랜잭션을 빼면 저장소 호출(조회/삭제/저장)이 각자 짧은 트랜잭션으로 돈다. 캐시
+     * 저장이 실패해도 그 저장만 실패하고, 이 요청은 분석 결과를 그대로 돌려준다.
+     */
     public CodeMapResponse getAnalyzedCodeMap(String workspaceId, String projectName, String branchName, String language) {
         String safeBranch = branchName == null ? "master" : branchName;
         String safeLanguage = language == null ? "JAVA" : language;
@@ -67,7 +80,6 @@ public class CodeMapService {
         if (cachedData.isPresent() && isCachedBeforeAiMarker(cachedData.get().getMapDataJson())) {
             log.info("♻️ [CodeMap] AI 생성 표시가 없는 옛 캐시라 다시 분석합니다.");
             codeMapCacheRepository.delete(cachedData.get());
-            codeMapCacheRepository.flush();
             cachedData = Optional.empty();
         }
 
@@ -78,7 +90,6 @@ public class CodeMapService {
             } catch (Exception e) {
                 log.warn("🚨 캐시 역직렬화 실패! 망가진 데이터를 삭제하고 재분석을 진행합니다.", e);
                 codeMapCacheRepository.delete(cachedData.get());
-                codeMapCacheRepository.flush();
             }
         }
 
@@ -101,6 +112,10 @@ public class CodeMapService {
                         .mapDataJson(json)
                         .build());
             }
+        } catch (DataIntegrityViolationException e) {
+            // 동시에 들어온 다른 요청이 같은 캐시를 먼저 저장했다. 그 캐시도 같은
+            // 파일들을 분석한 결과이므로 그대로 두면 된다.
+            log.info("⚡ [CodeMap] 다른 요청이 캐시를 먼저 저장했습니다. (Project: {})", projectName);
         } catch (Exception e) {
             log.error("코드맵 캐시 저장 실패", e);
         }
