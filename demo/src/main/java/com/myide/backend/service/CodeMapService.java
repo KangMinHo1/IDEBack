@@ -14,9 +14,11 @@ import com.myide.backend.dto.codemap.CreateComponentRequest;
 import com.myide.backend.dto.codemap.CreateRelationRequest;
 import com.myide.backend.dto.codemap.CodeMapResponse;
 import com.myide.backend.dto.codemap.CodeGenerateRequest;
+import com.myide.backend.dto.codemap.CodeNode;
 import com.myide.backend.repository.codemap.CodeMapCacheRepository;
 import com.myide.backend.repository.codemap.CodeSummaryRepository;
 import com.myide.backend.service.analyzer.CodeAnalyzer;
+import com.myide.backend.service.design.codegen.GeneratedMarker;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -55,6 +57,19 @@ public class CodeMapService {
         String safeLanguage = language == null ? "JAVA" : language;
 
         Optional<CodeMapCache> cachedData = codeMapCacheRepository.findByWorkspaceIdAndProjectNameAndBranchName(workspaceId, projectName, safeBranch);
+
+        // aiGenerated 가 생기기 전에 저장된 캐시는 그 값이 전부 false 로 읽힌다.
+        // 파일이 안 바뀌면 캐시가 계속 살아 있어서, 이미 만들어 둔 생성 파일에
+        // AI 표시가 영영 안 붙는다. 그래서 그 키가 없는 캐시는 없는 것으로 보고
+        // 한 번 다시 분석한다. 다시 분석하면 새 형식으로 저장되므로 한 번뿐이다.
+        // 노드가 하나도 없는 캐시는 키가 원래 없으니 제외한다. 안 그러면 빈
+        // 프로젝트는 열 때마다 다시 분석하게 된다.
+        if (cachedData.isPresent() && isCachedBeforeAiMarker(cachedData.get().getMapDataJson())) {
+            log.info("♻️ [CodeMap] AI 생성 표시가 없는 옛 캐시라 다시 분석합니다.");
+            codeMapCacheRepository.delete(cachedData.get());
+            codeMapCacheRepository.flush();
+            cachedData = Optional.empty();
+        }
 
         if (cachedData.isPresent()) {
             try {
@@ -100,6 +115,14 @@ public class CodeMapService {
         codeMapCacheRepository.deleteByWorkspaceIdAndProjectNameAndBranchName(workspaceId, projectName, safeBranch);
     }
 
+    private static boolean isCachedBeforeAiMarker(String json) {
+        if (json == null) {
+            return false;
+        }
+
+        return !json.contains("\"aiGenerated\"") && !json.contains("\"nodes\":[]");
+    }
+
     private CodeMapResponse doAnalyzeWorkspace(String workspaceId, String projectName, String branchName, String language) {
         Path projectPath = workspaceService.getProjectPath(workspaceId, projectName, branchName);
 
@@ -108,7 +131,35 @@ public class CodeMapService {
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("지원하지 않는 언어 템플릿입니다: " + language));
 
-        return selectedAnalyzer.analyze(projectPath.toString());
+        CodeMapResponse result = selectedAnalyzer.analyze(projectPath.toString());
+        markGeneratedFiles(result, projectPath);
+        return result;
+    }
+
+    /**
+     * 설계 관리의 코드 생성이 만든 파일에 표시를 단다.
+     *
+     * 분석기 네 개가 각자 노드를 만들지만 결과는 전부 여기를 지나므로, 분석기마다
+     * 넣지 않고 한 곳에서 채운다. 노드 id 는 브랜치 폴더 기준 상대경로다.
+     * 한 파일에 클래스가 여럿이면 노드도 여럿이고, 같은 파일이니 표시도 같다.
+     */
+    private void markGeneratedFiles(CodeMapResponse result, Path projectPath) {
+        if (result == null || result.getNodes() == null) {
+            return;
+        }
+
+        for (CodeNode node : result.getNodes()) {
+            if (node.getId() == null || node.getId().isBlank()) {
+                continue;
+            }
+
+            try {
+                node.setAiGenerated(GeneratedMarker.readsAsGenerated(projectPath.resolve(node.getId())));
+            } catch (RuntimeException e) {
+                // 경로가 이상해도 표시 하나 때문에 코드맵 전체를 실패시키지 않는다.
+                node.setAiGenerated(false);
+            }
+        }
     }
 
     @Transactional
