@@ -1,12 +1,20 @@
 package com.myide.backend.dto.apitest;
 
-import lombok.*;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Getter;
 
-@Getter @Setter
-@NoArgsConstructor @AllArgsConstructor
+import java.util.Map;
+
+@Getter
 @Builder
+@AllArgsConstructor
 public class ProxyResponse {
+
     private int status;
-    private Object data;     // JSON이면 Map/List, 아니면 String
-    private long time;       // ms
+    private String statusText;
+    private Object data;
+    private long timeMs;
+    private Map<String, String> headers;
+    private long size;
 }

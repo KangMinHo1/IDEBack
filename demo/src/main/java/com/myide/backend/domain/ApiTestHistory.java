@@ -26,13 +26,22 @@ public class ApiTestHistory {
 
     private Integer status;
 
+    @Column(length = 100)
+    private String statusText;
+
     private Boolean success;
 
     private Long durationMs;
 
+    private Long responseSize;
+
     @Lob
     @Column(columnDefinition = "LONGTEXT")
     private String responseBody;
+
+    @Lob
+    @Column(columnDefinition = "LONGTEXT")
+    private String responseHeadersJson;
 
     private LocalDateTime createdAt;
 

@@ -1,24 +1,55 @@
 package com.myide.backend.dto.apitest;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
-import lombok.*;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 
+import java.util.List;
 import java.util.Map;
 
-@Getter @Setter
-@NoArgsConstructor @AllArgsConstructor
-@Builder
+@Getter
+@Setter
+@NoArgsConstructor
 public class ProxyRequest {
 
     @NotBlank
     private String url;
 
     @NotBlank
-    private String method; // GET/POST/PUT/DELETE
+    private String method;
 
-    // key-value headers
     private Map<String, String> headers;
 
-    // raw body string (JSON 등)
+    // none | raw | form-data | x-www-form-urlencoded
+    private String bodyType;
+
+    // json | text | html | xml
+    private String rawType;
+
+    // raw / x-www-form-urlencoded 본문
     private String body;
+
+    @Valid
+    private List<FormDataPart> formData;
+
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    public static class FormDataPart {
+
+        @NotBlank
+        private String key;
+
+        // text | file
+        @NotBlank
+        private String type;
+
+        private String value;
+
+        private String fileName;
+        private String contentType;
+        private String base64;
+    }
 }
