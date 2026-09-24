@@ -33,7 +33,10 @@ public class GithubOAuthController {
     @Value("${github.client.secret:}")
     private String clientSecret;
 
-    @Value("${github.redirect-uri:http://localhost:3000/auth/github/callback}")
+    // 설정 이름은 application.yml 의 github.client.redirect-uri 와 정확히 같아야 한다.
+    // 예전에 github.redirect-uri 로 적혀 있어서 설정값이 전달되지 않았고,
+    // 기본값이던 localhost 주소가 그대로 GitHub 에 전송되어 연동이 항상 실패했다.
+    @Value("${github.client.redirect-uri:}")
     private String redirectUri;
 
     private final UserRepository userRepository;
