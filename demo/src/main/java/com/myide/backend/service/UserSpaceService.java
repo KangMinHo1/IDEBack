@@ -99,9 +99,27 @@ public class UserSpaceService {
         Path root = getUserRoot(userId);
         String relative = stripVirtualRoot(virtualPath);
 
-        Path target = relative.isBlank()
-                ? root
-                : root.resolve(relative).normalize();
+        /*
+         * 남은 경로를 통째로 resolve 에 넘기지 않고 한 칸씩 쪼개서 이어 붙인다.
+         *
+         * 가상 경로는 화면에 C:\수업\쇼핑몰 처럼 보이므로 구분자가 역슬래시인데,
+         * 리눅스에서는 역슬래시가 구분자가 아니라 그냥 글자다. 그래서 통째로 넘기면
+         * "수업\쇼핑몰" 이라는 이름의 폴더 하나를 찾게 되고, 실제로 존재하는
+         * 수업/쇼핑몰 을 못 찾아 폴더를 열 수 없었다. 윈도우에서만 우연히 동작했다.
+         *
+         * 쪼갠 조각에는 구분자가 남지 않으므로 조각 하나가 절대 경로가 되어
+         * 루트 밖으로 튀어 나가는 일도 없다. ".." 는 아래 normalize 와
+         * startsWith 검사에서 걸린다.
+         */
+        Path target = root;
+
+        for (String segment : relative.split("[\\\\/]+")) {
+            if (!segment.isBlank()) {
+                target = target.resolve(segment);
+            }
+        }
+
+        target = target.normalize();
 
         if (!target.startsWith(root)) {
             throw new ApiException(HttpStatus.FORBIDDEN, "이 위치는 사용할 수 없습니다.");
@@ -122,7 +140,13 @@ public class UserSpaceService {
             throw new ApiException(HttpStatus.FORBIDDEN, "이 위치는 사용할 수 없습니다.");
         }
 
-        String relative = root.relativize(absolute).toString();
+        /*
+         * relativize 가 돌려주는 구분자는 OS 를 따른다. 윈도우면 역슬래시, 리눅스면 슬래시다.
+         * 그대로 내보내면 리눅스에서 "C:\수업/쇼핑몰" 같은 뒤섞인 표기가 나가고,
+         * 그 값을 프론트가 다시 보내면 toReal 이 해석하지 못해 왕복이 깨진다.
+         * 화면 표기는 항상 역슬래시 하나로 통일한다.
+         */
+        String relative = root.relativize(absolute).toString().replace('/', '\\');
 
         return relative.isBlank() ? VIRTUAL_ROOT : VIRTUAL_ROOT + relative;
     }
