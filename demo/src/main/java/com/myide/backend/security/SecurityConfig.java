@@ -1,6 +1,7 @@
 package com.myide.backend.security;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -41,7 +42,10 @@ public class SecurityConfig {
      * Spring Security의 전체 보안 필터 체인 설정
      */
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain filterChain(
+            HttpSecurity http,
+            CorsConfigurationSource corsConfigurationSource
+    ) throws Exception {
         http
                 /*
                  * CSRF 보호 비활성화
@@ -58,7 +62,7 @@ public class SecurityConfig {
                  * 프론트엔드와 백엔드의 주소가 다를 때 발생하는
                  * Cross-Origin 요청을 허용하기 위한 설정이다.
                  */
-                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+                .cors(cors -> cors.configurationSource(corsConfigurationSource))
 
                 /*
                  * 세션 사용 안 함
@@ -158,44 +162,32 @@ public class SecurityConfig {
     /**
      * CORS 허용 정책 설정
      *
-     * 프론트엔드 개발 서버에서 백엔드 API를 호출할 수 있도록
+     * 프론트엔드에서 백엔드 API를 호출할 수 있도록
      * 허용할 출처, HTTP 메서드, 요청 헤더, 응답 헤더를 지정한다.
+     *
+     * 이 설정이 CORS를 처리하는 유일한 자리다. 예전에는 같은 목록이
+     * config/CorsConfig(WebMvcConfigurer)에도 한 벌 더 있었는데,
+     * 위 filterChain 에서 .cors(...) 로 이 소스를 지정하면 스프링 시큐리티가
+     * 필터 체인 맨 앞에서 헤더를 붙여 버린다. 그러면 뒤쪽 MVC 설정은
+     * "이미 붙어 있다"고 판단해 건너뛰므로 아무 효과가 없었다.
+     * 한쪽만 고치고 안 고쳐졌다고 헤매기 쉬운 구조라 그 파일은 지웠다.
+     *
+     * 허용 출처를 상수로 박아 두지 않고 app.cors.allowed-origins 로 받는 이유는
+     * 배포 주소(Vercel)와 개발 주소가 다르고, 웹소켓 쪽 설정과도 같은 목록을
+     * 써야 하기 때문이다. 목록의 원본은 application.yml 한 곳뿐이다.
      */
     @Bean
-    public CorsConfigurationSource corsConfigurationSource() {
+    public CorsConfigurationSource corsConfigurationSource(
+            @Value("${app.cors.allowed-origins}") String[] allowedOriginPatterns
+    ) {
         CorsConfiguration configuration = new CorsConfiguration();
 
         /*
-         * 요청을 허용할 프론트엔드 주소
-         *
-         * localhost는 개인 개발용,
-         * 192.168 / 10 / 172.16~31 대역은 같은 와이파이 또는 핫스팟에서
-         * 다른 PC가 메인 노트북 IP로 접속할 때 사용한다.
+         * 와일드카드가 섞인 목록은 setAllowedOrigins 가 아니라
+         * setAllowedOriginPatterns 로 넣어야 한다. 전자에 와일드카드와
+         * allowCredentials(true) 를 함께 주면 기동할 때 예외가 난다.
          */
-        configuration.setAllowedOriginPatterns(List.of(
-                "http://localhost:*",
-                "http://127.0.0.1:*",
-
-                "http://192.168.*.*:*",
-                "http://10.*.*.*:*",
-
-                "http://172.16.*.*:*",
-                "http://172.17.*.*:*",
-                "http://172.18.*.*:*",
-                "http://172.19.*.*:*",
-                "http://172.20.*.*:*",
-                "http://172.21.*.*:*",
-                "http://172.22.*.*:*",
-                "http://172.23.*.*:*",
-                "http://172.24.*.*:*",
-                "http://172.25.*.*:*",
-                "http://172.26.*.*:*",
-                "http://172.27.*.*:*",
-                "http://172.28.*.*:*",
-                "http://172.29.*.*:*",
-                "http://172.30.*.*:*",
-                "http://172.31.*.*:*"
-        ));
+        configuration.setAllowedOriginPatterns(List.of(allowedOriginPatterns));
 
         configuration.setAllowedMethods(List.of(
                 "GET",

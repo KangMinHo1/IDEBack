@@ -4,6 +4,7 @@ package com.myide.backend.config;
 import com.myide.backend.handler.*;
 import com.myide.backend.security.CollabHandshakeInterceptor;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.socket.server.standard.ServletServerContainerFactoryBean;
@@ -26,51 +27,37 @@ public class WebSocketConfig implements WebSocketConfigurer {
     private final WorkspaceEventWebSocketHandler workspaceEventWebSocketHandler;
     private final CollabHandshakeInterceptor collabHandshakeInterceptor;
 
-    private static final String[] ALLOWED_ORIGIN_PATTERNS = {
-            "http://localhost:*",
-            "http://127.0.0.1:*",
-
-            // 같은 와이파이/핫스팟에서 접속할 때 사용하는 사설 IP 대역
-            "http://192.168.*.*:*",
-            "http://10.*.*.*:*",
-            "http://172.16.*.*:*",
-            "http://172.17.*.*:*",
-            "http://172.18.*.*:*",
-            "http://172.19.*.*:*",
-            "http://172.20.*.*:*",
-            "http://172.21.*.*:*",
-            "http://172.22.*.*:*",
-            "http://172.23.*.*:*",
-            "http://172.24.*.*:*",
-            "http://172.25.*.*:*",
-            "http://172.26.*.*:*",
-            "http://172.27.*.*:*",
-            "http://172.28.*.*:*",
-            "http://172.29.*.*:*",
-            "http://172.30.*.*:*",
-            "http://172.31.*.*:*"
-    };
+    /**
+     * 접속을 받아 줄 출처 목록. 원본은 application.yml 의 app.cors.allowed-origins 하나뿐이고,
+     * HTTP 쪽 CORS 설정(SecurityConfig)과 같은 값을 쓴다.
+     *
+     * 목록이 같아도 설정을 따로 두어야 하는 이유는, 웹소켓 핸드셰이크가 브라우저의
+     * CORS 절차(사전 확인 요청)를 거치지 않기 때문이다. HTTP 쪽 필터는 여기에 관여하지
+     * 못하므로 서버가 직접 Origin 헤더를 확인해야 한다.
+     */
+    @Value("${app.cors.allowed-origins}")
+    private String[] allowedOriginPatterns;
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         registry.addHandler(runWebSocketHandler, "/ws/run")
-                .setAllowedOriginPatterns(ALLOWED_ORIGIN_PATTERNS);
+                .setAllowedOriginPatterns(allowedOriginPatterns);
 
         registry.addHandler(debugWebSocketHandler, "/ws/debug")
-                .setAllowedOriginPatterns(ALLOWED_ORIGIN_PATTERNS);
+                .setAllowedOriginPatterns(allowedOriginPatterns);
 
         registry.addHandler(terminalWebSocketHandler, "/ws/terminal")
-                .setAllowedOriginPatterns(ALLOWED_ORIGIN_PATTERNS);
+                .setAllowedOriginPatterns(allowedOriginPatterns);
 
         // 설계 문서와 코드 동시편집이 같은 엔드포인트를 쓴다.
         // 핸드셰이크 단계에서 JWT와 워크스페이스 멤버십을 확인한다.
         registry.addHandler(collaborationWebSocketHandler, "/ws/collab")
                 .addInterceptors(collabHandshakeInterceptor)
-                .setAllowedOriginPatterns(ALLOWED_ORIGIN_PATTERNS);
+                .setAllowedOriginPatterns(allowedOriginPatterns);
 
         // 파일 트리 변경 이벤트용
         registry.addHandler(workspaceEventWebSocketHandler, "/ws/workspace-events")
-                .setAllowedOriginPatterns(ALLOWED_ORIGIN_PATTERNS);
+                .setAllowedOriginPatterns(allowedOriginPatterns);
     }
 
     /**
