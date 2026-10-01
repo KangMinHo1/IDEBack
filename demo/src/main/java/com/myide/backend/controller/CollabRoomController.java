@@ -118,5 +118,10 @@ public class CollabRoomController {
         }
 
         accessGuard.requireAccess(workspaceId, userId);
+
+        // 개인 샌드박스 방의 문서는 주인만 읽고 쓴다. 접속 검사와 같은 규칙이다.
+        if (CollabRoomName.isSandboxRoom(room) && !userId.equals(CollabRoomName.sandboxOwnerOf(room))) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "다른 사람의 샌드박스입니다.");
+        }
     }
 }

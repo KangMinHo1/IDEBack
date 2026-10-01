@@ -7,6 +7,7 @@ import com.myide.backend.domain.User;
 import com.myide.backend.domain.workspace.TemplateType;
 import com.myide.backend.repository.UserRepository;
 import com.myide.backend.service.DockerService;
+import com.myide.backend.service.sandbox.SandboxService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -54,6 +55,7 @@ public class RunService {
     /**
      * @param include   사용자가 직접 고른 포함 작성자(고르지 않았으면 빈 집합)
      * @param exclude   사용자가 직접 고른 제외 작성자
+     * @param sandbox   샌드박스를 켠 채 실행하는지. 같은 조합 위에 내 샌드박스 파일을 덮는다
      * @param wantsInfo 기계용 안내 줄([SAFE_RUN_INFO])을 받을지. 받겠다고 한 클라이언트에게만
      *                  보낸다. 모르는 클라이언트는 그 줄을 출력 창에 그대로 찍어 버린다
      */
@@ -65,6 +67,7 @@ public class RunService {
             Long requester,
             Set<Long> include,
             Set<Long> exclude,
+            boolean sandbox,
             boolean wantsInfo
     ) {}
 
@@ -75,6 +78,7 @@ public class RunService {
     private final RunAssembler assembler;
     private final GreenService greenService;
     private final SafeRunBroadcaster broadcaster;
+    private final SandboxService sandboxService;
     private final UserRepository userRepository;
     private final ObjectMapper objectMapper;
 
@@ -196,6 +200,11 @@ public class RunService {
 
         RunPlanner.Attempt attempt = planner.first(ready, request.include(), request.exclude());
 
+        // 샌드박스 실행이면 어느 조합이든 맨 위에 내 샌드박스 파일을 덮는다.
+        SandboxService.Overlay overlay = request.sandbox()
+                ? sandboxService.overlay(key, request.requester())
+                : null;
+
         // 이 실행이 끝날 때까지 쓰는 컨테이너 하나와, 그동안 만든 임시 폴더들.
         DockerService.Workbench bench =
                 dockerService.openWorkbench(session, request.templateType().getDefaultPort());
@@ -216,8 +225,8 @@ public class RunService {
                         request.requester(),
                         attempt.included(),
                         attempt.includeUnknownChanges(),
-                        null,
-                        null
+                        overlay == null ? null : overlay.files(),
+                        overlay == null ? null : overlay.deleted()
                 ));
 
                 syncIntoContainer(bench.containerId(), previousRunDir, runDir, tempDirs);
@@ -233,7 +242,8 @@ public class RunService {
                 if (build.exitCode() == 0) {
                     boolean greenUpdated = false;
 
-                    if (planner.isPromotable(attempt)) {
+                    // 샌드박스 실행은 정상 버전으로 삼지 않는다. 팀에 아직 없는 내 수정이 섞여 있다.
+                    if (!request.sandbox() && planner.isPromotable(attempt)) {
                         greenUpdated = promoteGreen(key, runDir);
                     }
 

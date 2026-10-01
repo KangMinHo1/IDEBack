@@ -10,6 +10,7 @@ import com.myide.backend.service.NotificationService;
 import com.myide.backend.service.ProjectService;
 import com.myide.backend.service.WorkspaceService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.CrossOrigin;
@@ -30,6 +31,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
+@Slf4j
 @RestController
 @RequestMapping("/api/git")
 @RequiredArgsConstructor
@@ -700,6 +702,12 @@ public class GitController {
         return ResponseEntity.ok("Checkout successfully");
     }
 
+    /**
+     * @deprecated 개인 브랜치를 만드는 옛 샌드박스. 새 샌드박스(/api/sandbox, SandboxController)는
+     *             브랜치를 만들지 않는다. 프론트가 새 API 로 옮기면 지운다. 동작은 그대로 두고,
+     *             아직 쓰이는지 확인하려고 호출될 때마다 경고 로그만 남긴다.
+     */
+    @Deprecated
     @PostMapping("/sandbox/create")
     public ResponseEntity<String> createSandbox(
             @RequestBody Map<String, ?> body,
@@ -707,6 +715,10 @@ public class GitController {
     ) {
         String workspaceId = requireBodyValue(body, "workspaceId", "workspaceId가 없습니다.");
         String projectName = requireBodyValue(body, "projectName", "projectName이 없습니다.");
+
+        log.warn("⚠️ [Deprecated] 옛 샌드박스 API 호출: POST /api/git/sandbox/create "
+                        + "(사용자 = {}, 워크스페이스 = {}, 프로젝트 = {}, 기준 브랜치 = {}) — /api/sandbox 로 옮겨야 합니다.",
+                currentUserId, workspaceId, projectName, optionalBodyValue(body, "baseBranch"));
         String taskName = sanitizeBranchSegment(optionalBodyValue(body, "taskName"));
 
         String requestedBaseBranch = validateOptionalBranchName(
@@ -747,10 +759,25 @@ public class GitController {
         return ResponseEntity.ok(sandboxBranchName);
     }
 
+    /**
+     * @deprecated 개인 브랜치를 대상 브랜치에 병합하는 옛 샌드박스 반영. 새 반영은
+     *             /api/sandbox/merge · /applied · /apply-direct 다. 프론트가 옮기면 지운다.
+     *             동작은 그대로 두고 호출될 때마다 경고 로그만 남긴다.
+     */
+    @Deprecated
     @PostMapping("/sandbox/apply")
-    public ResponseEntity<?> applySandbox(@RequestBody Map<String, ?> body) {
+    public ResponseEntity<?> applySandbox(
+            @RequestBody Map<String, ?> body,
+            @AuthenticationPrincipal Long currentUserId
+    ) {
         String workspaceId = requireBodyValue(body, "workspaceId", "workspaceId가 없습니다.");
         String projectName = requireBodyValue(body, "projectName", "projectName이 없습니다.");
+
+        log.warn("⚠️ [Deprecated] 옛 샌드박스 API 호출: POST /api/git/sandbox/apply "
+                        + "(사용자 = {}, 워크스페이스 = {}, 프로젝트 = {}, 샌드박스 브랜치 = {}, 대상 브랜치 = {}) "
+                        + "— /api/sandbox 로 옮겨야 합니다.",
+                currentUserId, workspaceId, projectName,
+                optionalBodyValue(body, "sandboxBranch"), optionalBodyValue(body, "targetBranch"));
         String sandboxBranch = validateBranchName(requireBodyValue(body, "sandboxBranch", "sandboxBranch가 없습니다."));
         String targetBranch = validateOptionalBranchName(
                 optionalBodyValue(body, "targetBranch"),

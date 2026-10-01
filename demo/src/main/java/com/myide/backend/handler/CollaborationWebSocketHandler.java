@@ -199,6 +199,47 @@ public class CollaborationWebSocketHandler extends BinaryWebSocketHandler {
     }
 
     /**
+     * 이 방이 열려 있는가 — 누군가 접속해 있거나, 보관 중인 문서가 있는가.
+     *
+     * 문서까지 보는 이유: 파일을 여는 쪽은 문서를 먼저 등록(시드)하고 그 다음에 접속한다.
+     * 접속자만 보면 그 사이의 방을 닫힌 것으로 잘못 본다.
+     */
+    public boolean isRoomOpen(String room) {
+        if (room == null || room.isBlank()) {
+            return false;
+        }
+
+        Set<WebSocketSession> sessions = rooms.get(room);
+        return roomDocs.containsKey(room) || (sessions != null && !sessions.isEmpty());
+    }
+
+    /**
+     * 방이 닫혀 있을 때만 작업을 실행한다. 실행했으면 true.
+     *
+     * 서버가 디스크의 파일을 직접 고칠 때 쓴다. 방이 열려 있는데 디스크만 고치면, 그 방의
+     * 문서는 옛 내용 그대로라 누가 한 글자만 쳐도 자동 저장이 옛 내용으로 디스크를 덮는다.
+     *
+     * 확인과 실행 사이에 다른 사람이 이 방의 문서를 등록하지 못하게 묶는다. 다만 이미
+     * 디스크 내용을 읽어 간 뒤 등록만 남겨 둔 사람까지는 막지 못한다(그 틈은 남는다).
+     */
+    public boolean runIfRoomClosed(String room, Runnable action) {
+        boolean[] ran = {false};
+
+        roomDocs.compute(room, (name, doc) -> {
+            Set<WebSocketSession> sessions = rooms.get(name);
+
+            if (doc == null && (sessions == null || sessions.isEmpty())) {
+                action.run();
+                ran[0] = true;
+            }
+
+            return doc;
+        });
+
+        return ran[0];
+    }
+
+    /**
      * 파일(또는 폴더 아래 전부)의 보관 문서를 버린다. 파일을 지우거나 이름을 바꿨을 때 부른다.
      *
      * 버리지 않으면 같은 이름으로 다시 만든 파일을 여는 사람이 지워진 파일의 옛 문서를 받는다.

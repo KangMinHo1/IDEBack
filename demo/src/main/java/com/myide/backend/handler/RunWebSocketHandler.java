@@ -89,6 +89,7 @@ public class RunWebSocketHandler extends TextWebSocketHandler {
                     requester,
                     readUserIds(json, "includeAuthors"),
                     readUserIds(json, "excludeAuthors"),
+                    json.path("sandbox").asBoolean(false),
                     json.path("safeRunInfo").asBoolean(false)
             ));
             return;

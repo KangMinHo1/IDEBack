@@ -1,5 +1,6 @@
 package com.myide.backend.security;
 
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -79,7 +80,11 @@ public class CollabHandshakeInterceptor implements HandshakeInterceptor {
         attributes.put(ATTR_ROOM, room == null ? "default-room" : room);
         attributes.put(ATTR_WORKSPACE_ID, workspaceId);
 
-        if (!authEnabled) {
+        // 개인 샌드박스 방은 인증 스위치와 무관하게 항상 본인 확인을 한다. 스위치는 팀
+        // 동시편집이 막혔을 때 급히 푸는 용도인데, 그렇다고 남의 샌드박스까지 열리면 안 된다.
+        boolean sandboxRoom = CollabRoomName.isSandboxRoom(room);
+
+        if (!authEnabled && !sandboxRoom) {
             log.warn("⚠️ [Collab] 인증이 꺼져 있습니다. 방 = {}", room);
             return true;
         }
@@ -107,8 +112,28 @@ public class CollabHandshakeInterceptor implements HandshakeInterceptor {
             return false;
         }
 
+        if (sandboxRoom && !userId.equals(CollabRoomName.sandboxOwnerOf(room))) {
+            log.info("🚫 [Collab] 남의 샌드박스 방입니다. 사용자 = {}", userId);
+            response.setStatusCode(HttpStatus.FORBIDDEN);
+            return false;
+        }
+
         attributes.put(ATTR_USER_ID, userId);
         return true;
+    }
+
+    /**
+     * 인증을 끈 채로 띄웠으면 기동할 때 알린다.
+     *
+     * 안전 실행은 "누가 고쳤는지"를 접속할 때 확인한 회원번호로 가린다. 인증이 꺼지면
+     * 회원번호 없이 접속되므로 편집이 장부에 적히지 않고, 팀원의 변경을 골라 빼지 못한다
+     * (출처를 모르는 변경으로만 다뤄진다).
+     */
+    @PostConstruct
+    void warnIfAuthDisabled() {
+        if (!authEnabled) {
+            log.warn("⚠️ [Collab] collab.auth.enabled=false — 안전 실행의 작성자 구분이 동작하지 않습니다.");
+        }
     }
 
     @Override
