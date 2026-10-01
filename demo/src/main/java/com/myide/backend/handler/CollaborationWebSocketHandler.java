@@ -2,7 +2,12 @@
 package com.myide.backend.handler;
 
 import com.myide.backend.config.WebSocketConfig;
+import com.myide.backend.security.CollabHandshakeInterceptor;
+import com.myide.backend.security.CollabRoomName;
+import com.myide.backend.service.saferun.CollabEditListener;
+import com.myide.backend.service.saferun.YjsMessageKind;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.BinaryMessage;
 import org.springframework.web.socket.CloseStatus;
@@ -40,6 +45,19 @@ public class CollaborationWebSocketHandler extends BinaryWebSocketHandler {
      */
     private final Map<String, String> roomDocs = new ConcurrentHashMap<>();
 
+    /**
+     * 편집이 일어났음을 듣는 쪽(안전 실행의 편집 장부).
+     *
+     * 생성자가 아니라 세터로 받는 이유는, 이 핸들러가 듣는 쪽 없이도 중계기로서
+     * 온전히 동작해야 하기 때문이다(테스트도 그렇게 만든다).
+     */
+    private CollabEditListener editListener;
+
+    @Autowired(required = false)
+    public void setEditListener(CollabEditListener editListener) {
+        this.editListener = editListener;
+    }
+
     @Override
     public void afterConnectionEstablished(WebSocketSession session) {
         // 컨테이너 기본값과 별개로 스프링 쪽 세션 한도가 따로 걸린다.
@@ -69,12 +87,52 @@ public class CollaborationWebSocketHandler extends BinaryWebSocketHandler {
         String room = getRoomName(session);
         Set<WebSocketSession> roomSessions = rooms.get(room);
 
+        notifyEdit(session, room, message);
+
         if (roomSessions != null) {
             for (WebSocketSession s : roomSessions) {
                 if (s.isOpen() && !s.getId().equals(session.getId())) {
                     s.sendMessage(message);
                 }
             }
+        }
+    }
+
+    /**
+     * 코드 파일을 고친 메시지면 "누가 어느 파일을 고쳤는지"를 알린다.
+     *
+     * 내용은 여전히 해석하지 않는다. 메시지 앞의 종류 표시와, 접속할 때 확인해 둔
+     * 회원번호만 본다. 회원번호가 없는 접속(인증을 끈 경우)은 누구인지 알 수 없으므로
+     * 알리지 않는다.
+     *
+     * 여기서 무슨 일이 나도 중계는 계속돼야 한다. 그래서 예외를 삼킨다.
+     */
+    private void notifyEdit(WebSocketSession session, String room, BinaryMessage message) {
+        if (editListener == null) {
+            return;
+        }
+
+        try {
+            if (!YjsMessageKind.isDocumentEdit(message.getPayload())) {
+                return;
+            }
+
+            CollabRoomName.FileRoom fileRoom = CollabRoomName.parseFileRoom(room);
+            Object userId = session.getAttributes().get(CollabHandshakeInterceptor.ATTR_USER_ID);
+
+            if (fileRoom == null || !(userId instanceof Long authorId)) {
+                return;
+            }
+
+            editListener.onEdit(
+                    fileRoom.workspaceId(),
+                    fileRoom.projectName(),
+                    fileRoom.branchName(),
+                    fileRoom.filePath(),
+                    authorId
+            );
+        } catch (RuntimeException e) {
+            log.warn("⚠️ [Collab] 편집 기록 실패: 방 = {}, 이유 = {}", room, e.getMessage());
         }
     }
 

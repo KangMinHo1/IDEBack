@@ -126,6 +126,21 @@ public class WorkspaceEventWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
+    /*
+     * 한 브랜치를 보고 있는 사람들에게 임의의 메시지를 보낸다.
+     *
+     * 안전 실행의 작성자 상태·정상 버전 갱신 알림이 쓴다. 메시지에는 반드시
+     * type 필드가 있어야 프론트가 파일 트리 이벤트와 구분할 수 있다.
+     */
+    public void broadcastToBranch(
+            String workspaceId,
+            String projectName,
+            String branchName,
+            Object payload
+    ) {
+        broadcast(buildRoomName(workspaceId, projectName, normalizeBranchName(branchName)), payload);
+    }
+
     private void broadcast(String room, Object payload) {
         Set<WebSocketSession> sessions = rooms.get(room);
 

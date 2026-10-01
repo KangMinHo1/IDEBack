@@ -48,6 +48,30 @@ public final class CollabRoomName {
         return separator > 0 ? room.substring(0, separator) : room;
     }
 
+    /** 코드 에디터 방 이름을 쪼갠 것. */
+    public record FileRoom(String workspaceId, String projectName, String branchName, String filePath) {}
+
+    /**
+     * 코드 에디터 방 이름({workspaceId}:{project}:{branch}:{file})을 쪼갠다.
+     * 그 형식이 아니면 null.
+     *
+     * 브랜치 이름에는 ':' 가 올 수 없다(프론트와 GitController 가 막는다). 그래서 앞의
+     * 세 칸만 ':' 로 자르고 나머지는 전부 파일 경로로 본다.
+     */
+    public static FileRoom parseFileRoom(String room) {
+        if (!isFileRoom(room)) {
+            return null;
+        }
+
+        String[] parts = room.split(":", 4);
+
+        if (parts.length < 4 || parts[1].isBlank() || parts[2].isBlank() || parts[3].isBlank()) {
+            return null;
+        }
+
+        return new FileRoom(parts[0], parts[1], parts[2], parts[3]);
+    }
+
     /**
      * 파일 하나를 여는 방인가.
      *

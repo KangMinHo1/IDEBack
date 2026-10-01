@@ -8,6 +8,9 @@ import com.myide.backend.handler.WorkspaceEventWebSocketHandler;
 import com.myide.backend.service.BuildService;
 import com.myide.backend.service.FileService;
 import com.myide.backend.service.ProjectService;
+import com.myide.backend.service.saferun.AuthorStatusService;
+import com.myide.backend.service.saferun.BranchKey;
+import com.myide.backend.service.saferun.EditLedger;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.Resource;
@@ -15,6 +18,7 @@ import org.springframework.core.io.UrlResource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.net.MalformedURLException;
@@ -32,6 +36,9 @@ public class IdeController {
 
     // 파일 트리 변경 이벤트 WebSocket broadcast 용도
     private final WorkspaceEventWebSocketHandler workspaceEventWebSocketHandler;
+
+    // 안전 실행: 누가 무엇을 고쳤는지 적고, 저장된 파일의 문법을 검사한다
+    private final AuthorStatusService authorStatusService;
 
     @GetMapping("/{workspaceId}/projects")
     public ResponseEntity<FileNode> getProjects(@PathVariable String workspaceId) {
@@ -64,39 +71,74 @@ public class IdeController {
     }
 
     @PostMapping("/files")
-    public ResponseEntity<String> createFile(@RequestBody @Valid FileRequest request) {
+    public ResponseEntity<String> createFile(
+            @RequestBody @Valid FileRequest request,
+            @AuthenticationPrincipal Long userId
+    ) {
         fileService.createFile(request);
 
         // 파일 생성 후 같은 workspace/project/branch 방에 접속 중인 사용자들에게 알림
         workspaceEventWebSocketHandler.broadcastFileTreeChanged(request, "CREATE");
+
+        authorStatusService.recordEdit(branchKeyOf(request), request.getFilePath(), userId);
 
         return ResponseEntity.ok("생성됨");
     }
 
     @PostMapping("/save")
     public ResponseEntity<String> saveFile(@RequestBody @Valid FileRequest request) {
-        fileService.saveFile(request);
+        // 저장한 사람을 작성자로 적지 않는다. 팀 모드의 자동 저장은 고친 사람이 아니라
+        // "저장 담당자"가 보내기 때문이다. 작성자는 동시 편집 메시지에서 따로 적는다.
+        // 여기서는 방금 디스크에 들어간 내용의 문법만 검사한다.
+        if (fileService.saveFile(request)) {
+            authorStatusService.onFileSaved(branchKeyOf(request), request.getFilePath(), request.getCode());
+        }
+
         return ResponseEntity.ok("저장됨");
     }
 
     @DeleteMapping("/files")
-    public ResponseEntity<String> deleteFile(@RequestBody @Valid FileRequest request) {
+    public ResponseEntity<String> deleteFile(
+            @RequestBody @Valid FileRequest request,
+            @AuthenticationPrincipal Long userId
+    ) {
         fileService.deleteFile(request);
 
         // 파일 삭제 후 같은 workspace/project/branch 방에 접속 중인 사용자들에게 알림
         workspaceEventWebSocketHandler.broadcastFileTreeChanged(request, "DELETE");
 
+        // 삭제도 "이 사람의 변경"이다. 이 사람이 실행에서 제외되면 지워진 파일이 되살아나야 한다.
+        BranchKey key = branchKeyOf(request);
+        authorStatusService.recordEdit(key, request.getFilePath(), userId);
+        authorStatusService.onFileRemoved(key, request.getFilePath());
+
         return ResponseEntity.ok("삭제됨");
     }
 
     @PutMapping("/files/rename")
-    public ResponseEntity<String> renameFile(@RequestBody @Valid FileRequest request) {
+    public ResponseEntity<String> renameFile(
+            @RequestBody @Valid FileRequest request,
+            @AuthenticationPrincipal Long userId
+    ) {
         fileService.renameFile(request);
 
         // 파일명 변경 후 같은 workspace/project/branch 방에 접속 중인 사용자들에게 알림
         workspaceEventWebSocketHandler.broadcastFileTreeChanged(request, "RENAME");
 
+        // 이름 변경은 "옛 경로 삭제 + 새 경로 생성"으로 적는다.
+        BranchKey key = branchKeyOf(request);
+        String oldPath = EditLedger.normalizePath(request.getFilePath());
+        String parent = oldPath.contains("/") ? oldPath.substring(0, oldPath.lastIndexOf('/') + 1) : "";
+
+        authorStatusService.recordEdit(key, oldPath, userId);
+        authorStatusService.onFileRemoved(key, oldPath);
+        authorStatusService.recordEdit(key, parent + request.getNewName(), userId);
+
         return ResponseEntity.ok("변경됨");
+    }
+
+    private BranchKey branchKeyOf(FileRequest request) {
+        return BranchKey.of(request.getWorkspaceId(), request.getProjectName(), request.getBranchName());
     }
 
     @PostMapping("/build")

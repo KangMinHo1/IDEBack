@@ -177,7 +177,11 @@ public class FileService {
         }
     }
 
-    public void saveFile(FileRequest request) {
+    /**
+     * @return 실제로 디스크에 썼으면 true. 아래 방어에 걸려 쓰지 않았으면 false.
+     *         부르는 쪽이 "저장된 내용"을 근거로 무언가 할 때(문법 검사 등) 구분해야 한다.
+     */
+    public boolean saveFile(FileRequest request) {
         String branchName = normalizeBranchName(request.getBranchName());
 
         Path target = getSecureTargetPath(
@@ -212,7 +216,7 @@ public class FileService {
                     && Files.size(target) > 0) {
 
                 log.warn("⚠️ [File] 빈 내용 저장을 막았습니다: {}", target);
-                return;
+                return false;
             }
 
             Files.writeString(target, code, StandardCharsets.UTF_8);
@@ -222,6 +226,8 @@ public class FileService {
                     request.getProjectName(),
                     branchName
             );
+
+            return true;
 
         } catch (IOException e) {
             throw new RuntimeException("파일 저장 실패: " + e.getMessage(), e);
