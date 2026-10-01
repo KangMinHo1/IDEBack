@@ -1,6 +1,7 @@
 package com.myide.backend.service;
 
 import com.github.dockerjava.api.DockerClient;
+import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.command.CreateContainerResponse;
 import com.github.dockerjava.api.command.InspectContainerResponse;
 import com.github.dockerjava.api.model.ExposedPort;
@@ -26,6 +27,7 @@ import java.nio.file.*;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 @Slf4j
@@ -188,6 +190,175 @@ public class DockerService {
         }
 
         return finalHostPort;
+    }
+
+    /** 안전 실행이 프로그램 출력을 받는 곳. */
+    public interface RunOutput {
+        void onOutput(String chunk);
+
+        /** 프로그램이 끝났다(정상 종료·강제 종료 모두). 두 번 불릴 수 있다. */
+        void onClosed();
+    }
+
+    /** 안전 실행 한 번이 쓰는 컨테이너. hostPort 는 서버형 프로젝트일 때만 0 보다 크다. */
+    public record Workbench(String containerId, int hostPort) {}
+
+    /** exitCode 가 음수면 명령이 끝까지 돌지 못한 것이다(시간 초과, 컨테이너가 사라짐). */
+    public record ExecResult(int exitCode, String output) {}
+
+    /**
+     * 안전 실행용 컨테이너를 띄운다. 아무것도 실행하지 않고 대기만 한다.
+     *
+     * 기존 runProject 는 "컴파일 && 실행"을 컨테이너의 주 명령으로 넘기므로 컴파일이
+     * 실패했는지 알 수 없고, 다시 하려면 컨테이너를 새로 띄워야 한다. 안전 실행은
+     * 조합을 바꿔 가며 여러 번 컴파일할 수 있어야 해서, 컨테이너 하나를 띄워 두고 그
+     * 안에서 명령을 따로 실행한다(execAndWait, execStreaming). 그러면 gradle 데몬과
+     * 받아 둔 의존성이 다음 시도에도 남아 있어 두 번째부터는 훨씬 빠르다.
+     *
+     * 기존 실행 경로(runProject)는 건드리지 않는다.
+     */
+    public Workbench openWorkbench(WebSocketSession session, int internalPort) {
+        String sessionId = session.getId();
+        stopContainer(sessionId);
+
+        int hostPort = internalPort > 0 ? findFreePort() : 0;
+
+        var createCmd = dockerClient.createContainerCmd("ide-execution-env")
+                .withWorkingDir("/app")
+                .withTty(false)
+                .withEnv("PYTHONUNBUFFERED=1");
+
+        if (internalPort > 0) {
+            ExposedPort exposedPort = ExposedPort.tcp(internalPort);
+            Ports portBindings = new Ports();
+            portBindings.bind(exposedPort, Ports.Binding.bindPort(hostPort));
+
+            createCmd.withExposedPorts(exposedPort)
+                    .withHostConfig(new HostConfig().withPortBindings(portBindings));
+        }
+
+        String containerId = createCmd.withCmd("sleep", "infinity").exec().getId();
+
+        // 중지(STOP)가 기존 경로 그대로 동작하도록 같은 맵에 올린다.
+        runningContainerMap.put(sessionId, containerId);
+
+        try {
+            dockerClient.startContainerCmd(containerId).exec();
+        } catch (RuntimeException e) {
+            closeWorkbench(sessionId, containerId);
+            throw e;
+        }
+
+        log.info("🧰 안전 실행 컨테이너 준비: {} (내부 포트: {}, 매핑 포트: {})", containerId, internalPort, hostPort);
+
+        return new Workbench(containerId, hostPort);
+    }
+
+    /** 호스트 폴더의 내용을 컨테이너의 /app 에 덮어쓴다. 폴더에 없는 파일은 건드리지 않는다. */
+    public void copyInto(String containerId, Path hostDir) {
+        dockerClient.copyArchiveToContainerCmd(containerId)
+                .withHostResource(hostDir.toString() + "/.")
+                .withRemotePath("/app")
+                .exec();
+    }
+
+    /** 컨테이너 안에서 명령을 실행하고 끝날 때까지 기다린다. 컴파일에 쓴다. */
+    public ExecResult execAndWait(String containerId, String shellCommand, long timeoutSeconds)
+            throws InterruptedException {
+
+        StringBuffer output = new StringBuffer();
+
+        try {
+            String execId = dockerClient.execCreateCmd(containerId)
+                    .withAttachStdout(true)
+                    .withAttachStderr(true)
+                    .withCmd("sh", "-c", shellCommand)
+                    .exec().getId();
+
+            boolean finished = dockerClient.execStartCmd(execId)
+                    .exec(new ResultCallback.Adapter<Frame>() {
+                        @Override
+                        public void onNext(Frame item) {
+                            output.append(new String(item.getPayload(), StandardCharsets.UTF_8));
+                        }
+                    })
+                    .awaitCompletion(timeoutSeconds, TimeUnit.SECONDS);
+
+            if (!finished) {
+                return new ExecResult(-1, output.toString());
+            }
+
+            Long exitCode = dockerClient.inspectExecCmd(execId).exec().getExitCodeLong();
+            return new ExecResult(exitCode == null ? -1 : exitCode.intValue(), output.toString());
+        } catch (RuntimeException e) {
+            // 사용자가 중지를 눌러 컨테이너가 사라진 경우가 대부분이다.
+            log.warn("컨테이너 명령 실행 실패: {}", e.getMessage());
+            return new ExecResult(-1, output.toString());
+        }
+    }
+
+    /**
+     * 컨테이너 안에서 프로그램을 실행하고 출력을 흘려보낸다. 시작만 하고 바로 돌아온다.
+     *
+     * 사용자 입력(INPUT)이 기존 경로(writeToProcess) 그대로 이 프로그램에 닿도록 입력
+     * 파이프를 같은 맵에 올린다.
+     */
+    public void execStreaming(WebSocketSession session, String containerId, String shellCommand, RunOutput output)
+            throws IOException {
+
+        String execId = dockerClient.execCreateCmd(containerId)
+                .withAttachStdin(true)
+                .withAttachStdout(true)
+                .withAttachStderr(true)
+                .withCmd("sh", "-c", shellCommand)
+                .exec().getId();
+
+        PipedOutputStream outToDocker = new PipedOutputStream();
+        runInputMap.put(session.getId(), outToDocker);
+
+        dockerClient.execStartCmd(execId)
+                .withStdIn(new PipedInputStream(outToDocker))
+                .exec(new ResultCallback.Adapter<Frame>() {
+                    @Override
+                    public void onNext(Frame item) {
+                        output.onOutput(new String(item.getPayload(), StandardCharsets.UTF_8));
+                    }
+
+                    @Override
+                    public void onError(Throwable throwable) {
+                        // 컨테이너를 강제로 지우면 연결이 끊기며 오류로 들어온다. 정상 흐름이다.
+                        output.onClosed();
+                    }
+
+                    @Override
+                    public void onComplete() {
+                        output.onClosed();
+                        super.onComplete();
+                    }
+                });
+    }
+
+    /**
+     * 안전 실행이 띄운 컨테이너를 치운다. 실행이 끝나든 실패하든 반드시 부른다.
+     *
+     * 세션에 지금 묶여 있는 것이 이 컨테이너일 때만 맵에서 뺀다. 같은 세션으로 새
+     * 실행이 이미 시작됐다면 맵에는 새 컨테이너가 올라와 있다. 세션 ID 만 보고 지우면
+     * 그 새 컨테이너를 죽인다.
+     */
+    public void closeWorkbench(String sessionId, String containerId) {
+        if (runningContainerMap.remove(sessionId, containerId)) {
+            PipedOutputStream outputStream = runInputMap.remove(sessionId);
+            if (outputStream != null) {
+                try { outputStream.close(); } catch (IOException e) {}
+            }
+        }
+
+        try {
+            dockerClient.removeContainerCmd(containerId).withForce(true).exec();
+        } catch (Exception e) {
+            // 중지를 눌러 이미 지워진 경우다.
+            log.debug("안전 실행 컨테이너 정리: 이미 없음 ({})", e.getMessage());
+        }
     }
 
     public int debugProject(WebSocketSession session, String workspaceId, String projectName, String branchName, String filePath, LanguageType language, Consumer<String> logHandler) {
