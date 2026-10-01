@@ -198,6 +198,19 @@ public class CollaborationWebSocketHandler extends BinaryWebSocketHandler {
         roomDocs.put(room, yjsUpdate);
     }
 
+    /**
+     * 파일(또는 폴더 아래 전부)의 보관 문서를 버린다. 파일을 지우거나 이름을 바꿨을 때 부른다.
+     *
+     * 버리지 않으면 같은 이름으로 다시 만든 파일을 여는 사람이 지워진 파일의 옛 문서를 받는다.
+     */
+    public void dropDocsUnder(String roomOfPath) {
+        if (roomOfPath == null || roomOfPath.isBlank()) {
+            return;
+        }
+
+        roomDocs.keySet().removeIf(room -> room.equals(roomOfPath) || room.startsWith(roomOfPath + "/"));
+    }
+
     /** 시드 결과. accepted 가 false 면 이미 있던 문서를 돌려준 것이다. */
     public record SeedOutcome(boolean accepted, String yjsUpdate) {}
 

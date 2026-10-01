@@ -29,6 +29,11 @@ public final class CollabRoomName {
     private CollabRoomName() {
     }
 
+    /** 코드 에디터가 팀과 공유하는 방의 이름. 프론트(CodeEditor)가 만드는 것과 같아야 한다. */
+    public static String fileRoom(String workspaceId, String projectName, String branchName, String filePath) {
+        return workspaceId + ":" + projectName + ":" + branchName + ":" + filePath;
+    }
+
     /** 방 이름에서 워크스페이스 식별자를 뽑는다. 알 수 없으면 null. */
     public static String workspaceIdOf(String room) {
         if (room == null || room.isBlank()) {

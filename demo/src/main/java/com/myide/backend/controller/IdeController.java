@@ -4,7 +4,9 @@ import com.myide.backend.dto.ide.BuildRequest;
 import com.myide.backend.dto.ide.FileNode;
 import com.myide.backend.dto.ide.FileRequest;
 import com.myide.backend.dto.project.CreateProjectRequest;
+import com.myide.backend.handler.CollaborationWebSocketHandler;
 import com.myide.backend.handler.WorkspaceEventWebSocketHandler;
+import com.myide.backend.security.CollabRoomName;
 import com.myide.backend.service.BuildService;
 import com.myide.backend.service.FileService;
 import com.myide.backend.service.ProjectService;
@@ -39,6 +41,9 @@ public class IdeController {
 
     // 안전 실행: 누가 무엇을 고쳤는지 적고, 저장된 파일의 문법을 검사한다
     private final AuthorStatusService authorStatusService;
+
+    // 파일을 지우거나 이름을 바꾸면 그 파일의 동시편집 문서도 버려야 한다
+    private final CollaborationWebSocketHandler collaborationHandler;
 
     @GetMapping("/{workspaceId}/projects")
     public ResponseEntity<FileNode> getProjects(@PathVariable String workspaceId) {
@@ -107,6 +112,11 @@ public class IdeController {
         // 파일 삭제 후 같은 workspace/project/branch 방에 접속 중인 사용자들에게 알림
         workspaceEventWebSocketHandler.broadcastFileTreeChanged(request, "DELETE");
 
+        // 지운 파일의 동시편집 문서를 버린다. 남겨 두면 같은 이름으로 다시 만든 파일이
+        // 옛 문서를 받는다. (열어 둔 사람의 자동 저장이 파일을 되살리는 것은
+        // FileService.saveFile 이 막는다.)
+        collaborationHandler.dropDocsUnder(roomOf(request));
+
         // 삭제도 "이 사람의 변경"이다. 이 사람이 실행에서 제외되면 지워진 파일이 되살아나야 한다.
         BranchKey key = branchKeyOf(request);
         authorStatusService.recordEdit(key, request.getFilePath(), userId);
@@ -125,6 +135,9 @@ public class IdeController {
         // 파일명 변경 후 같은 workspace/project/branch 방에 접속 중인 사용자들에게 알림
         workspaceEventWebSocketHandler.broadcastFileTreeChanged(request, "RENAME");
 
+        // 옛 경로의 동시편집 문서를 버린다(삭제와 같은 이유).
+        collaborationHandler.dropDocsUnder(roomOf(request));
+
         // 이름 변경은 "옛 경로 삭제 + 새 경로 생성"으로 적는다.
         BranchKey key = branchKeyOf(request);
         String oldPath = EditLedger.normalizePath(request.getFilePath());
@@ -139,6 +152,18 @@ public class IdeController {
 
     private BranchKey branchKeyOf(FileRequest request) {
         return BranchKey.of(request.getWorkspaceId(), request.getProjectName(), request.getBranchName());
+    }
+
+    /** 이 파일을 팀이 함께 여는 동시편집 방의 이름. */
+    private String roomOf(FileRequest request) {
+        BranchKey key = branchKeyOf(request);
+
+        return CollabRoomName.fileRoom(
+                key.workspaceId(),
+                key.projectName(),
+                key.branchName(),
+                EditLedger.normalizePath(request.getFilePath())
+        );
     }
 
     @PostMapping("/build")
