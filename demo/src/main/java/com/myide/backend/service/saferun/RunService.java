@@ -16,7 +16,6 @@ import org.springframework.web.socket.WebSocketSession;
 
 import jakarta.annotation.PostConstruct;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -74,6 +73,8 @@ public class RunService {
     private final EditLedger ledger;
     private final AuthorStatusService authorStatusService;
     private final RunAssembler assembler;
+    private final GreenService greenService;
+    private final SafeRunBroadcaster broadcaster;
     private final UserRepository userRepository;
     private final ObjectMapper objectMapper;
 
@@ -181,7 +182,7 @@ public class RunService {
         RunPlanner planner = new RunPlanner(
                 ledgerSnapshot,
                 request.requester(),
-                Files.isDirectory(paths.green(key)),
+                greenService.exists(key),
                 isSpringBoot ? springBootMaxBuilds : consoleMaxBuilds
         );
 
@@ -230,8 +231,13 @@ public class RunService {
                 }
 
                 if (build.exitCode() == 0) {
-                    // 정상 버전 갱신은 다음 단계에서 붙인다.
-                    announceSuccess(session, request, planner, attempt, false);
+                    boolean greenUpdated = false;
+
+                    if (planner.isPromotable(attempt)) {
+                        greenUpdated = promoteGreen(key, runDir);
+                    }
+
+                    announceSuccess(session, request, planner, attempt, greenUpdated);
 
                     // 컴파일러 경고는 기존 실행에서도 보이던 것이라 그대로 보여 준다.
                     if (!build.output().isBlank()) {
@@ -298,6 +304,21 @@ public class RunService {
         if (!delta.removed().isEmpty()) {
             dockerService.execAndWait(containerId, delta.removeShell(), 60);
         }
+    }
+
+    /** 컴파일에 성공한 실행 폴더를 정상 버전으로 삼는다. 성공했으면 true. */
+    private boolean promoteGreen(BranchKey key, Path runDir) {
+        try {
+            greenService.promote(key, runDir);
+        } catch (IOException e) {
+            // 정상 버전 갱신은 덤이다. 실패했다고 이미 성공한 실행을 막지 않는다.
+            log.warn("⚠️ [SafeRun] 정상 버전 갱신 실패: {}", e.getMessage());
+            return false;
+        }
+
+        authorStatusService.refresh(key);
+        broadcaster.greenUpdated(key);
+        return true;
     }
 
     /** 컴파일이 성공했다. 같은 컨테이너에서 프로그램을 실행하고 끝날 때까지 기다린다. */
