@@ -701,10 +701,12 @@ public class GitController {
     }
 
     @PostMapping("/sandbox/create")
-    public ResponseEntity<String> createSandbox(@RequestBody Map<String, ?> body) {
+    public ResponseEntity<String> createSandbox(
+            @RequestBody Map<String, ?> body,
+            @AuthenticationPrincipal Long currentUserId
+    ) {
         String workspaceId = requireBodyValue(body, "workspaceId", "workspaceId가 없습니다.");
         String projectName = requireBodyValue(body, "projectName", "projectName이 없습니다.");
-        String nickname = sanitizeBranchSegment(optionalBodyValue(body, "nickname"));
         String taskName = sanitizeBranchSegment(optionalBodyValue(body, "taskName"));
 
         String requestedBaseBranch = validateOptionalBranchName(
@@ -712,7 +714,10 @@ public class GitController {
                 DEFAULT_BRANCH_NAME
         );
 
-        String sandboxBranchName = validateBranchName("focus-" + nickname + "-" + taskName);
+        // 주인은 닉네임이 아니라 회원번호로 적는다.
+        // 닉네임은 한글이 전부 지워져 여러 사람이 똑같이 "dev" 가 되므로
+        // 이름만으로는 누구 샌드박스인지 가릴 수 없었다.
+        String sandboxBranchName = validateBranchName("focus-u" + currentUserId + "-" + taskName);
 
         Path masterRepoPath = workspaceService.getProjectPath(
                 workspaceId,
