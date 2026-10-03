@@ -8,6 +8,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.List;
+
 public interface PostRepository extends JpaRepository<Post, Long> {
 
     // ==========================================
@@ -53,7 +55,6 @@ public interface PostRepository extends JpaRepository<Post, Long> {
             Pageable pageable
     );
 
-
     // ==========================================
     // 관리자 공지 목록
     // ==========================================
@@ -63,10 +64,18 @@ public interface PostRepository extends JpaRepository<Post, Long> {
             Pageable pageable
     );
 
-
     // ==========================================
     // 특정 사용자 작성 게시글 수
     // ==========================================
 
     long countByAuthorId(Long authorId);
+
+    // ==========================================
+    // 마이페이지 - 내가 쓴 일반 게시글
+    // ==========================================
+
+    List<Post> findByAuthorIdAndPostTypeOrderByCreatedAtDesc(
+            Long authorId,
+            PostType postType
+    );
 }
