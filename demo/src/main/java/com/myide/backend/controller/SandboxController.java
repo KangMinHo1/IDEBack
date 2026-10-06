@@ -115,6 +115,13 @@ public class SandboxController {
                 branchOf(request, userId), userId, request.filePath(), request.liveContent());
     }
 
+    /** 팀 변경을 내 샌드박스 파일로 가져온다. code = 내 문서의 지금 내용, liveContent = 팀 문서의 지금 내용. */
+    @PostMapping("/pull")
+    public SandboxService.MergeView pull(@AuthenticationPrincipal Long userId, @RequestBody SandboxRequest request) {
+        return sandboxService.pull(
+                branchOf(request, userId), userId, request.filePath(), request.code(), request.liveContent());
+    }
+
     @PostMapping("/resolve")
     public ResponseEntity<Void> resolve(@AuthenticationPrincipal Long userId, @RequestBody SandboxRequest request) {
         sandboxService.resolve(

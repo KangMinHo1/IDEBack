@@ -13,6 +13,7 @@ import com.myide.backend.service.ProjectService;
 import com.myide.backend.service.saferun.AuthorStatusService;
 import com.myide.backend.service.saferun.BranchKey;
 import com.myide.backend.service.saferun.EditLedger;
+import com.myide.backend.service.sandbox.SandboxService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.Resource;
@@ -44,6 +45,9 @@ public class IdeController {
 
     // 파일을 지우거나 이름을 바꾸면 그 파일의 동시편집 문서도 버려야 한다
     private final CollaborationWebSocketHandler collaborationHandler;
+
+    // 팀 파일이 바뀌면, 그 파일을 샌드박스에서 고치는 사람에게 알린다
+    private final SandboxService sandboxService;
 
     @GetMapping("/{workspaceId}/projects")
     public ResponseEntity<FileNode> getProjects(@PathVariable String workspaceId) {
@@ -97,6 +101,10 @@ public class IdeController {
         // 여기서는 방금 디스크에 들어간 내용의 문법만 검사한다.
         if (fileService.saveFile(request)) {
             authorStatusService.onFileSaved(branchKeyOf(request), request.getFilePath(), request.getCode());
+
+            // 이 파일을 샌드박스에서 고치는 사람은 팀의 편집이 화면에 보이지 않는다.
+            // 팀 파일이 바뀌었다는 사실만이라도 알려 준다.
+            sandboxService.notifyTeamFileChanged(branchKeyOf(request), request.getFilePath());
         }
 
         return ResponseEntity.ok("저장됨");
@@ -122,6 +130,9 @@ public class IdeController {
         authorStatusService.recordEdit(key, request.getFilePath(), userId);
         authorStatusService.onFileRemoved(key, request.getFilePath());
 
+        // 지워진 파일(또는 폴더 아래 파일)을 샌드박스에서 고치던 사람에게 알린다.
+        sandboxService.notifyTeamFileChanged(key, request.getFilePath());
+
         return ResponseEntity.ok("삭제됨");
     }
 
@@ -146,6 +157,9 @@ public class IdeController {
         authorStatusService.recordEdit(key, oldPath, userId);
         authorStatusService.onFileRemoved(key, oldPath);
         authorStatusService.recordEdit(key, parent + request.getNewName(), userId);
+
+        // 옛 이름의 파일을 샌드박스에서 고치던 사람에게 알린다(팀 쪽에서는 그 파일이 사라졌다).
+        sandboxService.notifyTeamFileChanged(key, oldPath);
 
         return ResponseEntity.ok("변경됨");
     }

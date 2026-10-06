@@ -439,6 +439,181 @@ class SandboxServiceTest {
                 new SandboxService.PendingFile("B.java", SandboxService.Kind.MODIFIED));
     }
 
+    // ── 팀 변경 알림 / 가져오기 ───────────────────────────────────────
+
+    @Test
+    @DisplayName("내가 고치는 동안 팀이 그 파일을 고치면 상태에 표시된다")
+    void stateFlagsFilesTheTeamChanged() throws IOException {
+        writeLive("Same.java", "v1");
+        writeLive("Moved.java", "v1");
+        sandbox.saveFile(KEY, ME, "Same.java", "mine");
+        sandbox.saveFile(KEY, ME, "Moved.java", "mine");
+
+        // 샌드박스에서 고치는 파일은 팀원의 편집이 화면에 안 보인다. 이 표시가 유일한 단서다.
+        writeLive("Moved.java", "v2 (team)");
+
+        assertThat(sandbox.state(KEY, ME).files()).containsExactly(
+                new SandboxService.PendingFile("Moved.java", SandboxService.Kind.MODIFIED, true),
+                new SandboxService.PendingFile("Same.java", SandboxService.Kind.MODIFIED, false));
+    }
+
+    @Test
+    @DisplayName("내가 지운 파일을 팀이 고쳤거나, 내 새 파일과 같은 이름을 팀이 만들어도 표시된다")
+    void stateFlagsDeletedAndNewFiles() throws IOException {
+        writeLive("Gone.java", "v1");
+        sandbox.deleteFile(KEY, ME, "Gone.java");
+        sandbox.saveFile(KEY, ME, "Fresh.java", "mine");
+
+        writeLive("Gone.java", "v2 (team)");
+        writeLive("Fresh.java", "team made it too");
+
+        assertThat(sandbox.state(KEY, ME).files()).containsExactly(
+                new SandboxService.PendingFile("Fresh.java", SandboxService.Kind.NEW, true),
+                new SandboxService.PendingFile("Gone.java", SandboxService.Kind.DELETED, true));
+    }
+
+    @Test
+    @DisplayName("서로 다른 곳을 고쳤으면 팀 변경이 내 것에 합쳐지고, 팀 파일은 그대로다")
+    void pullMergesTeamChangesIntoMine() throws IOException {
+        writeLive("src/Main.java", "a\nb\nc\n");
+        sandbox.saveFile(KEY, ME, "src/Main.java", "a (mine)\nb\nc\n");
+        writeLive("src/Main.java", "a\nb\nc (team)\n");
+
+        SandboxService.MergeView view =
+                sandbox.pull(KEY, ME, "src/Main.java", "a (mine)\nb\nc\n", "a\nb\nc (team)\n");
+
+        assertThat(view.status()).isEqualTo(SandboxService.MergeStatus.CLEAN);
+        assertThat(view.content()).isEqualTo("a (mine)\nb\nc (team)\n");
+        assertThat(sandbox.readFile(KEY, ME, "src/Main.java")).isEqualTo("a (mine)\nb\nc (team)\n");
+
+        // 가져오기는 팀 → 나 한 방향이다. 내 수정이 팀에 가는 것은 반영할 때뿐이다.
+        assertThat(readLive("src/Main.java")).isEqualTo("a\nb\nc (team)\n");
+        Mockito.verifyNoInteractions(workspaceEventHandler);
+    }
+
+    @Test
+    @DisplayName("가져온 뒤에는 팀 변경 표시가 꺼지고, 바로 반영하면 충돌 없이 들어간다")
+    void pullMovesTheBase() throws IOException {
+        writeLive("src/Main.java", "a\nb\nc\n");
+        sandbox.saveFile(KEY, ME, "src/Main.java", "a (mine)\nb\nc\n");
+        writeLive("src/Main.java", "a\nb\nc (team)\n");
+
+        sandbox.pull(KEY, ME, "src/Main.java", "a (mine)\nb\nc\n", null);
+
+        // 기준을 옮기지 않으면 같은 변경을 계속 "팀이 고쳤다"로 본다.
+        assertThat(sandbox.state(KEY, ME).files()).containsExactly(
+                new SandboxService.PendingFile("src/Main.java", SandboxService.Kind.MODIFIED, false));
+
+        SandboxService.MergeView apply = sandbox.merge(KEY, ME, "src/Main.java", null);
+        assertThat(apply.status()).isEqualTo(SandboxService.MergeStatus.CLEAN);
+        assertThat(apply.content()).isEqualTo("a (mine)\nb\nc (team)\n");
+
+        // 한 번 더 가져와도 달라지는 것이 없다.
+        assertThat(sandbox.pull(KEY, ME, "src/Main.java", "a (mine)\nb\nc (team)\n", null).status())
+                .isEqualTo(SandboxService.MergeStatus.UNCHANGED);
+    }
+
+    @Test
+    @DisplayName("브라우저가 준 내 문서 내용이 서버에 저장된 것보다 앞서 있으면 그것으로 합친다")
+    void pullUsesMineFromBrowser() throws IOException {
+        writeLive("src/Main.java", "a\nb\nc\n");
+        sandbox.saveFile(KEY, ME, "src/Main.java", "a (saved)\nb\nc\n");
+
+        // 자동 저장은 몇 초 늦다. 방금 친 것은 브라우저의 문서에만 있다.
+        SandboxService.MergeView view =
+                sandbox.pull(KEY, ME, "src/Main.java", "a (just typed)\nb\nc\n", "a\nb\nc (team)\n");
+
+        assertThat(view.content()).isEqualTo("a (just typed)\nb\nc (team)\n");
+    }
+
+    @Test
+    @DisplayName("나는 사본만 뜨고 안 고쳤으면 팀 것으로 그대로 바뀐다")
+    void pullReplacesUntouchedCopy() throws IOException {
+        writeLive("src/Main.java", "v1");
+        sandbox.fork(KEY, ME, "src/Main.java", null);
+
+        SandboxService.MergeView view = sandbox.pull(KEY, ME, "src/Main.java", "v1", "v2 (team)");
+
+        assertThat(view.status()).isEqualTo(SandboxService.MergeStatus.CLEAN);
+        assertThat(view.content()).isEqualTo("v2 (team)");
+    }
+
+    @Test
+    @DisplayName("같은 곳을 고쳤으면 아무것도 쓰지 않고 충돌을 돌려준다")
+    void pullStopsOnConflict() throws IOException {
+        writeLive("src/Main.java", "v1\n");
+        sandbox.saveFile(KEY, ME, "src/Main.java", "mine\n");
+
+        SandboxService.MergeView view = sandbox.pull(KEY, ME, "src/Main.java", "mine\n", "team\n");
+
+        assertThat(view.status()).isEqualTo(SandboxService.MergeStatus.CONFLICT);
+        assertThat(view.content()).contains("<<<<<<< sandbox", "mine", "team");
+
+        // 내 파일과 기준은 그대로다. 고른 뒤 resolve 가 옮긴다.
+        assertThat(sandbox.readFile(KEY, ME, "src/Main.java")).isEqualTo("mine\n");
+
+        sandbox.resolve(KEY, ME, "src/Main.java", "mine\nteam\n", "team\n");
+        assertThat(sandbox.merge(KEY, ME, "src/Main.java", "team\n").status())
+                .isEqualTo(SandboxService.MergeStatus.CLEAN);
+    }
+
+    @Test
+    @DisplayName("팀이 안 고쳤으면 가져올 것이 없다")
+    void pullNothingWhenTeamUntouched() throws IOException {
+        writeLive("src/Main.java", "v1");
+        sandbox.saveFile(KEY, ME, "src/Main.java", "mine");
+
+        SandboxService.MergeView view = sandbox.pull(KEY, ME, "src/Main.java", "mine", "v1");
+
+        assertThat(view.status()).isEqualTo(SandboxService.MergeStatus.UNCHANGED);
+        assertThat(view.content()).isEqualTo("mine");
+    }
+
+    @Test
+    @DisplayName("팀 파일이 바뀌면, 그 파일을 샌드박스에 둔 사람이 있을 때만 알린다")
+    void notifiesOnlyWhenSomeoneForkedTheFile() throws IOException {
+        writeLive("src/Main.java", "v1");
+        writeLive("Other.java", "v1");
+        sandbox.saveFile(KEY, ME, "src/Main.java", "mine");
+
+        assertThat(sandbox.hasForkOf(KEY, "src/Main.java")).isTrue();
+        assertThat(sandbox.hasForkOf(KEY, "src")).as("폴더가 지워지는 경우").isTrue();
+        assertThat(sandbox.hasForkOf(KEY, "Other.java")).isFalse();
+
+        // 평소 저장마다 알림이 나가면 안 된다.
+        sandbox.notifyTeamFileChanged(KEY, "Other.java");
+        Mockito.verifyNoInteractions(workspaceEventHandler);
+
+        sandbox.notifyTeamFileChanged(KEY, "src/Main.java");
+
+        ArgumentCaptor<Object> payload = ArgumentCaptor.forClass(Object.class);
+        Mockito.verify(workspaceEventHandler).broadcastToBranch(
+                Mockito.eq("ws-1"), Mockito.eq("shop"), Mockito.eq("focus-u12-login"), payload.capture());
+
+        assertThat(payload.getValue()).isEqualTo(java.util.Map.of(
+                "type", "SANDBOX_TEAM_FILE_CHANGED",
+                "workspaceId", "ws-1",
+                "projectName", "shop",
+                "branchName", "focus-u12-login",
+                "filePath", "src/Main.java"));
+    }
+
+    @Test
+    @DisplayName("내가 반영해 팀 파일이 바뀌면, 같은 파일을 샌드박스에서 고치던 다른 사람에게 알린다")
+    void applyNotifiesOtherSandboxes() throws IOException {
+        writeLive("src/Main.java", "a\nb\nc\n");
+        sandbox.saveFile(KEY, ME, "src/Main.java", "a (mine)\nb\nc\n");
+        sandbox.saveFile(KEY, OTHER, "src/Main.java", "a\nb\nc (other)\n");
+
+        sandbox.applyDirect(KEY, ME, "src/Main.java");
+
+        Mockito.verify(workspaceEventHandler).broadcastToBranch(
+                Mockito.eq("ws-1"), Mockito.eq("shop"), Mockito.eq("focus-u12-login"), Mockito.any());
+
+        assertThat(sandbox.state(KEY, OTHER).files()).containsExactly(
+                new SandboxService.PendingFile("src/Main.java", SandboxService.Kind.MODIFIED, true));
+    }
+
     // ── 버리기 / 실행 ─────────────────────────────────────────────────
 
     @Test

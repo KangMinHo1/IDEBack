@@ -26,6 +26,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.stream.Stream;
@@ -58,7 +59,18 @@ public class SandboxService {
         DELETED
     }
 
-    public record PendingFile(String filePath, Kind kind) {}
+    /**
+     * @param teamChanged 내가 이 파일을 고치기 시작한 뒤로 팀 파일이 달라졌는지.
+     *                    샌드박스에서 고치는 파일은 팀원의 편집이 화면에 보이지 않는다.
+     *                    그래서 "팀이 이 파일을 고쳤다"는 사실만이라도 알려 줘야, 모르는 채
+     *                    오래 작업하다 반영할 때 충돌을 한꺼번에 만나지 않는다
+     */
+    public record PendingFile(String filePath, Kind kind, boolean teamChanged) {
+
+        public PendingFile(String filePath, Kind kind) {
+            this(filePath, kind, false);
+        }
+    }
 
     /** @param files 아직 팀 파일에 반영하지 않은 것 */
     public record State(boolean enabled, List<PendingFile> files) {}
@@ -124,9 +136,17 @@ public class SandboxService {
             try (Stream<Path> walk = Files.walk(files)) {
                 for (Path file : walk.filter(Files::isRegularFile).toList()) {
                     String path = files.relativize(file).toString().replace("\\", "/");
-                    boolean hasBase = Files.isRegularFile(base.resolve(path));
+                    String baseContent = readIfExists(base.resolve(path));
+                    String live = readLive(key, path);
 
-                    pending.add(new PendingFile(path, hasBase ? Kind.MODIFIED : Kind.NEW));
+                    // 고치기 시작한 뒤로 팀 파일이 달라졌는가. 새로 만든 파일은 비교할 원본이
+                    // 없으므로, 팀 쪽에 같은 이름의 파일이 생겼으면 달라진 것으로 본다.
+                    boolean teamChanged = baseContent == null
+                            ? live != null
+                            : !baseContent.equals(live);
+
+                    pending.add(new PendingFile(
+                            path, baseContent == null ? Kind.NEW : Kind.MODIFIED, teamChanged));
                 }
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
@@ -134,7 +154,13 @@ public class SandboxService {
         }
 
         for (String deleted : meta.deleted()) {
-            pending.add(new PendingFile(deleted, Kind.DELETED));
+            String baseContent = readIfExists(inside(base, deleted));
+            String live = readLive(key, deleted);
+
+            // 내가 지운 파일을 그 사이 팀이 고쳤다. 반영하면 삭제 충돌이 된다.
+            boolean teamChanged = live != null && baseContent != null && !live.equals(baseContent);
+
+            pending.add(new PendingFile(deleted, Kind.DELETED, teamChanged));
         }
 
         pending.sort(Comparator.comparing(PendingFile::filePath));
@@ -294,6 +320,137 @@ public class SandboxService {
     }
 
     /**
+     * 팀 변경을 내 샌드박스 파일로 가져온다(반영의 반대 방향). 팀 파일에는 쓰지 않는다.
+     *
+     * 샌드박스에서 고치는 파일은 팀원의 편집이 보이지 않는다. 반영할 때까지 기다리지 않고
+     * 그동안의 팀 변경을 미리 내 것에 합쳐 두는 길이다.
+     *
+     * <pre>
+     *   팀이 안 바꿨다(live == base)            → 가져올 것이 없다                UNCHANGED
+     *   나는 안 바꿨다(mine == base)            → 내 것을 팀 것으로 바꾼다         CLEAN
+     *   둘 다 바꿨고 겹치지 않는다              → 합친 것을 내 것으로 삼는다       CLEAN
+     *   같은 곳을 바꿨다                        → 아무것도 쓰지 않고 충돌을 돌려준다  CONFLICT
+     * </pre>
+     *
+     * 가져왔으면 비교 기준(base)을 그 팀 내용으로 옮긴다. 옮기지 않으면 같은 변경을 다음에
+     * 또 "팀이 고쳤다"로 보고, 반영할 때도 이미 합친 자리에서 다시 충돌한다.
+     *
+     * @param mine        브라우저가 내 개인 방 문서에서 읽은 지금 내용. 서버에 저장된 것보다
+     *                    몇 초 앞서 있을 수 있어서 이것을 쓴다
+     * @param liveContent 브라우저가 팀 공유 문서에서 읽은 지금 내용. 없으면(null) 디스크
+     * @return content 는 가져온 뒤의 내 파일 내용(CONFLICT 면 충돌 표식이 든 본문)
+     */
+    public synchronized MergeView pull(
+            BranchKey key, Long userId, String filePath, String mine, String liveContent
+    ) {
+        String path = requirePath(filePath);
+        Path mineFile = inside(filesDir(key, userId), path);
+        Path baseFile = inside(baseDir(key, userId), path);
+
+        if (!Files.isRegularFile(mineFile)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "샌드박스에 없는 파일입니다: " + path);
+        }
+
+        boolean roomOpen = collaborationHandler.isRoomOpen(roomOf(key, path));
+        String current = mine != null ? mine : read(mineFile);
+        String live = liveContent != null ? liveContent : readLive(key, path);
+        String base = readIfExists(baseFile);
+
+        // 팀 쪽에 파일이 없다(내가 새로 만들었거나 팀이 지웠다). 가져올 것이 없다.
+        if (live == null) {
+            return new MergeView(path, MergeStatus.UNCHANGED, current, roomOpen);
+        }
+
+        // base 가 없으면 양쪽이 같은 이름의 파일을 각자 새로 만든 것이다. 빈 파일에서 출발한 것으로 본다.
+        String baseContent = base == null ? "" : base;
+
+        if (live.equals(baseContent)) {
+            return new MergeView(path, MergeStatus.UNCHANGED, current, roomOpen);
+        }
+
+        if (live.equals(current)) {
+            // 둘이 같은 내용이 됐다. 내용은 그대로 두고 기준만 옮긴다.
+            write(baseFile, live);
+            return new MergeView(path, MergeStatus.UNCHANGED, current, roomOpen);
+        }
+
+        if (current.equals(baseContent)) {
+            write(mineFile, live);
+            write(baseFile, live);
+            return new MergeView(path, MergeStatus.CLEAN, live, roomOpen);
+        }
+
+        ThreeWayMerger.Result result = merger.merge(baseContent, current, live);
+
+        if (result.outcome() == ThreeWayMerger.Outcome.CONFLICT) {
+            return new MergeView(path, MergeStatus.CONFLICT, result.content(), roomOpen);
+        }
+
+        write(mineFile, result.content());
+        write(baseFile, live);
+        return new MergeView(path, MergeStatus.CLEAN, result.content(), roomOpen);
+    }
+
+    /**
+     * 이 팀 파일의 사본을 자기 샌드박스에 들고 있는 사람이 있는가.
+     *
+     * 팀 파일이 바뀔 때마다 부른다. 있으면 그 사람들에게 "팀이 이 파일을 고쳤다"고
+     * 알려야 한다. 폴더가 있는지만 보므로 가볍다.
+     */
+    public boolean hasForkOf(BranchKey key, String filePath) {
+        String path = EditLedger.normalizePath(filePath);
+        Path owners = paths.sandboxOwners(key);
+
+        if (path.isEmpty() || !Files.isDirectory(owners)) {
+            return false;
+        }
+
+        try (Stream<Path> children = Files.list(owners)) {
+            return children.anyMatch(owner -> {
+                Path inBase = RunAssembler.resolveInside(owner.resolve("base"), path);
+                Path inFiles = RunAssembler.resolveInside(owner.resolve("files"), path);
+
+                // 폴더가 지워지거나 이름이 바뀐 경우도 잡으려고 폴더까지 본다.
+                return (inBase != null && Files.exists(inBase)) || (inFiles != null && Files.exists(inFiles));
+            });
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    /**
+     * 팀 파일이 바뀌었다. 그 파일을 샌드박스에서 고치는 사람이 있으면 브랜치 방으로 알린다.
+     *
+     * 누구의 샌드박스인지는 싣지 않는다. 받은 쪽이 자기 목록에 있는 파일일 때만 상태를
+     * 다시 받아 간다. 아무도 그 파일을 샌드박스에 두지 않았으면 보내지 않는다.
+     */
+    public void notifyTeamFileChanged(BranchKey key, String filePath) {
+        String path = EditLedger.normalizePath(filePath);
+
+        try {
+            if (!hasForkOf(key, path)) {
+                return;
+            }
+
+            workspaceEventHandler.broadcastToBranch(
+                    key.workspaceId(),
+                    key.projectName(),
+                    key.branchName(),
+                    Map.of(
+                            "type", "SANDBOX_TEAM_FILE_CHANGED",
+                            "workspaceId", key.workspaceId(),
+                            "projectName", key.projectName(),
+                            "branchName", key.branchName(),
+                            "filePath", path
+                    )
+            );
+        } catch (RuntimeException e) {
+            // 알림은 덤이다. 실패했다고 파일 저장을 막지 않는다.
+            log.warn("⚠️ [Sandbox] 팀 변경 알림 실패: {}", e.getMessage());
+        }
+    }
+
+    /**
      * 충돌을 해결했다. 해결한 내용을 내 샌드박스 파일로 저장하고, 비교 기준(base)을
      * 충돌을 계산할 때 본 팀 파일 내용으로 옮긴다.
      *
@@ -393,6 +550,12 @@ public class SandboxService {
         }
 
         markApplied(key, userId, path);
+
+        // 내 반영으로 팀 파일이 바뀌었다. 같은 파일을 자기 샌드박스에서 고치는 다른 사람에게 알린다.
+        if (view.status() != MergeStatus.UNCHANGED) {
+            notifyTeamFileChanged(key, path);
+        }
+
         return view;
     }
 

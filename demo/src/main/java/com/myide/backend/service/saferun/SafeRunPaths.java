@@ -55,6 +55,11 @@ public class SafeRunPaths {
         return green.resolveSibling(green.getFileName() + ".stamp");
     }
 
+    /** 이 브랜치의 샌드박스들이 사람별로 모여 있는 폴더. 바로 아래 폴더 이름이 회원번호다. */
+    public Path sandboxOwners(BranchKey key) {
+        return branchDir(key, "sandbox");
+    }
+
     public Path sandbox(BranchKey key, Long userId) {
         return inside(root, branchDir(key, "sandbox").resolve(String.valueOf(userId)));
     }
