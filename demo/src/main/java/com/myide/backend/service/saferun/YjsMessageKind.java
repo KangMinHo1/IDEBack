@@ -20,6 +20,7 @@ import java.nio.ByteBuffer;
 public final class YjsMessageKind {
 
     private static final int MESSAGE_SYNC = 0;
+    private static final int MESSAGE_AWARENESS = 1;
     private static final int SYNC_UPDATE = 2;
 
     private YjsMessageKind() {
@@ -35,5 +36,14 @@ public final class YjsMessageKind {
 
         return payload.get(start) == MESSAGE_SYNC
                 && payload.get(start + 1) == SYNC_UPDATE;
+    }
+
+    /** 커서·접속자 정보(awareness) 메시지인지. 읽는 위치는 옮기지 않는다. */
+    public static boolean isAwareness(ByteBuffer payload) {
+        if (payload == null || payload.remaining() < 1) {
+            return false;
+        }
+
+        return payload.get(payload.position()) == MESSAGE_AWARENESS;
     }
 }

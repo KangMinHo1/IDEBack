@@ -89,9 +89,21 @@ public class CollaborationWebSocketHandler extends BinaryWebSocketHandler {
 
         notifyEdit(session, room, message);
 
+        // awareness 는 보낸 사람에게도 돌려준다.
+        //
+        // y-websocket 클라이언트는 30초 동안 아무 메시지도 못 받으면 연결이 죽은 줄
+        // 알고 끊었다가 다시 붙는다. 방에 혼자 있으면 받을 것이 없어 30초마다 끊겼고,
+        // 그때마다 방이 비어 보관 문서가 지워졌다. 그 사이 다른 사람이 같은 파일을
+        // 열면 디스크 내용으로 원본을 새로 만들어, 남아 있던 옛 원본과 합쳐지면서
+        // 내용이 두 번 들어갔다. 자기 awareness(15초마다 자동 갱신)가 돌아오면 끊기지
+        // 않는다. 표준 y-websocket 서버도 이렇게 하고, 클라이언트는 자기 상태를 무시한다.
+        //
+        // 문서 동기화 메시지는 돌려주지 않는다. 돌려받으면 쓸데없는 왕복만 생긴다.
+        boolean echoToSender = YjsMessageKind.isAwareness(message.getPayload());
+
         if (roomSessions != null) {
             for (WebSocketSession s : roomSessions) {
-                if (s.isOpen() && !s.getId().equals(session.getId())) {
+                if (s.isOpen() && (echoToSender || !s.getId().equals(session.getId()))) {
                     s.sendMessage(message);
                 }
             }
