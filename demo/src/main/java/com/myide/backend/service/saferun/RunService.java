@@ -206,8 +206,9 @@ public class RunService {
                 : null;
 
         // 이 실행이 끝날 때까지 쓰는 컨테이너 하나와, 그동안 만든 임시 폴더들.
+        // Spring Boot 는 창(Swing)을 띄울 수도 있어 화면 중계용 포트를 미리 열어 둔다.
         DockerService.Workbench bench =
-                dockerService.openWorkbench(session, request.templateType().getDefaultPort());
+                dockerService.openWorkbench(session, request.templateType().getDefaultPort(), isSpringBoot);
         List<Path> tempDirs = new ArrayList<>();
 
         try {
@@ -254,10 +255,13 @@ public class RunService {
                         send(session, build.output().stripTrailing() + "\n");
                     }
 
+                    // 실제로 실행될 조합에 창 코드가 있는지 본다. 임시 폴더를 지우기 전에 봐야 한다.
+                    boolean desktopUi = bench.guiHostPort() > 0 && DesktopUiDetector.usesDesktopUi(runDir);
+
                     // 컨테이너에 다 들어갔으니 임시 폴더는 프로그램이 도는 동안 붙들고 있을 이유가 없다.
                     deleteAll(tempDirs);
 
-                    runProgram(session, bench, commands);
+                    runProgram(session, bench, commands, desktopUi && startDesktop(session, bench));
                     finish(session);
                     return;
                 }
@@ -331,13 +335,50 @@ public class RunService {
         return true;
     }
 
+    /**
+     * 창을 그릴 가짜 모니터를 프로그램에 알려 준다.
+     *
+     * Spring Boot 는 스스로 "화면 없음"(java.awt.headless=true)을 켜는데, 값이 이미 있으면
+     * 덮어쓰지 않는다. 그래서 사용자 코드를 고치지 않고 여기서 꺼 준다. 컨테이너 전체가 아니라
+     * 실행 명령에만 붙이는 이유는, 창을 안 쓰는 실행의 출력에 JVM 의 "Picked up
+     * JAVA_TOOL_OPTIONS" 줄이 끼지 않게 하려는 것이다.
+     */
+    private static final String DESKTOP_ENV =
+            "export DISPLAY=:99 JAVA_TOOL_OPTIONS=-Djava.awt.headless=false; ";
+
+    /**
+     * 컨테이너 안에 가짜 모니터와 화면 중계를 켠다. 켰으면 true.
+     *
+     * 프론트는 [GUI_STARTED_PORT:n] 을 보고 미리보기에 "앱 화면" 탭을 띄운다. 실행 이미지가
+     * 예전 것이라 화면 기능이 없으면 그 탭이 빈 화면으로 뜨므로, 신호를 보내지 않고 알려만 준다.
+     * 프로그램은 그대로 실행된다(API 는 쓸 수 있다).
+     */
+    private boolean startDesktop(WebSocketSession session, DockerService.Workbench bench)
+            throws InterruptedException {
+
+        DockerService.ExecResult started = dockerService.execAndWait(bench.containerId(), "ide-gui-start", 30);
+
+        if (started.exitCode() != 0) {
+            send(session, "[System] 화면(Swing) 코드가 있지만 실행 환경에 화면 기능이 없어요. "
+                    + "ide-execution-env 이미지를 다시 빌드해 주세요\n");
+            return false;
+        }
+
+        send(session, "[System] 화면(Swing) 코드를 찾아 앱 화면을 함께 켰어요\n");
+        send(session, "\n[GUI_STARTED_PORT:" + bench.guiHostPort() + "]\n");
+        return true;
+    }
+
     /** 컴파일이 성공했다. 같은 컨테이너에서 프로그램을 실행하고 끝날 때까지 기다린다. */
-    private void runProgram(WebSocketSession session, DockerService.Workbench bench, RunCommands.Commands commands)
+    private void runProgram(WebSocketSession session, DockerService.Workbench bench, RunCommands.Commands commands,
+                            boolean desktopUi)
             throws IOException, InterruptedException {
 
         CountDownLatch ended = new CountDownLatch(1);
 
-        dockerService.execStreaming(session, bench.containerId(), commands.runShell(), new DockerService.RunOutput() {
+        String runShell = desktopUi ? DESKTOP_ENV + commands.runShell() : commands.runShell();
+
+        dockerService.execStreaming(session, bench.containerId(), runShell, new DockerService.RunOutput() {
             @Override
             public void onOutput(String chunk) {
                 send(session, chunk);

@@ -66,3 +66,38 @@ RUN wget https://services.gradle.org/distributions/gradle-8.5-bin.zip -P /tmp \
     && unzip -d /opt/gradle /tmp/gradle-8.5-bin.zip \
     && ln -s /opt/gradle/gradle-8.5/bin/gradle /usr/bin/gradle \
     && rm /tmp/gradle-8.5-bin.zip
+
+# 11. 창(Swing) 프로그램용 가짜 모니터와 화면 중계
+#
+# 컨테이너에는 모니터가 없어서 Swing 창을 띄우면 HeadlessException 으로 죽는다.
+#   Xvfb       화면을 메모리에만 그리는 가짜 모니터
+#   openbox    창 관리자. 없으면 창에 제목 줄이 없고 글자 입력 칸에 포커스가 안 간다
+#   x11vnc     그 화면을 원격 화면(VNC) 신호로 내보낸다
+#   novnc      VNC 를 브라우저가 볼 수 있는 웹 페이지로 바꾼다 (IDE 의 미리보기 창에 뜬다)
+#   fonts-nanum 한글 글꼴. 없으면 한글이 네모로 나온다
+RUN apt-get update && apt-get install -y \
+    xvfb \
+    openbox \
+    x11vnc \
+    novnc \
+    websockify \
+    fonts-nanum \
+    && rm -rf /var/lib/apt/lists/*
+
+# 화면을 켜는 스크립트. 서버(RunService)가 창을 쓰는 프로그램을 실행하기 직전에 부른다.
+# 6080 은 DockerService.GUI_PORT 와 같아야 한다.
+# 백그라운드로 띄우는 것들의 출력은 버린다. 붙들고 있으면 이 스크립트를 부른 쪽이 끝나지 않는다.
+RUN printf '%s\n' \
+    '#!/bin/sh' \
+    '[ -e /tmp/.X11-unix/X99 ] && exit 0' \
+    'Xvfb :99 -screen 0 1024x640x24 -nolisten tcp >/dev/null 2>&1 &' \
+    'i=0' \
+    'while [ ! -e /tmp/.X11-unix/X99 ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done' \
+    '[ -e /tmp/.X11-unix/X99 ] || exit 1' \
+    'DISPLAY=:99 openbox >/dev/null 2>&1 &' \
+    'x11vnc -display :99 -forever -shared -nopw -quiet -rfbport 5900 >/dev/null 2>&1 &' \
+    'websockify --web /usr/share/novnc 6080 localhost:5900 >/dev/null 2>&1 &' \
+    'exit 0' \
+    > /usr/local/bin/ide-gui-start \
+    && chmod +x /usr/local/bin/ide-gui-start
+

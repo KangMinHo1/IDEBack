@@ -24,7 +24,9 @@ import org.springframework.web.socket.WebSocketSession;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -200,8 +202,14 @@ public class DockerService {
         void onClosed();
     }
 
-    /** 안전 실행 한 번이 쓰는 컨테이너. hostPort 는 서버형 프로젝트일 때만 0 보다 크다. */
-    public record Workbench(String containerId, int hostPort) {}
+    /** 화면 중계(noVNC)가 컨테이너 안에서 듣는 포트. 실행 이미지의 ide-gui-start 와 같아야 한다. */
+    public static final int GUI_PORT = 6080;
+
+    /**
+     * 안전 실행 한 번이 쓰는 컨테이너. hostPort 는 서버형 프로젝트일 때만 0 보다 크다.
+     * guiHostPort 는 화면 중계용 포트를 열어 둔 경우에만 0 보다 크다.
+     */
+    public record Workbench(String containerId, int hostPort, int guiHostPort) {}
 
     /** exitCode 가 음수면 명령이 끝까지 돌지 못한 것이다(시간 초과, 컨테이너가 사라짐). */
     public record ExecResult(int exitCode, String output) {}
@@ -216,24 +224,40 @@ public class DockerService {
      * 받아 둔 의존성이 다음 시도에도 남아 있어 두 번째부터는 훨씬 빠르다.
      *
      * 기존 실행 경로(runProject)는 건드리지 않는다.
+     *
+     * @param openGuiPort 화면 중계용 포트도 열어 둘지(Swing 창을 미리보기에 띄울 때 쓴다)
      */
-    public Workbench openWorkbench(WebSocketSession session, int internalPort) {
+    public Workbench openWorkbench(WebSocketSession session, int internalPort, boolean openGuiPort) {
         String sessionId = session.getId();
         stopContainer(sessionId);
 
         int hostPort = internalPort > 0 ? findFreePort() : 0;
+        int guiHostPort = openGuiPort ? findFreePort() : 0;
 
         var createCmd = dockerClient.createContainerCmd("ide-execution-env")
                 .withWorkingDir("/app")
                 .withTty(false)
                 .withEnv("PYTHONUNBUFFERED=1");
 
+        // 포트는 컨테이너를 만들 때만 열 수 있다. 화면을 실제로 쓸지는 컴파일이 끝난 뒤에야
+        // 알 수 있으므로(어느 조합이 실행될지 그때 정해진다) 길만 미리 열어 둔다.
+        List<ExposedPort> exposedPorts = new ArrayList<>();
+        Ports portBindings = new Ports();
+
         if (internalPort > 0) {
             ExposedPort exposedPort = ExposedPort.tcp(internalPort);
-            Ports portBindings = new Ports();
+            exposedPorts.add(exposedPort);
             portBindings.bind(exposedPort, Ports.Binding.bindPort(hostPort));
+        }
 
-            createCmd.withExposedPorts(exposedPort)
+        if (openGuiPort) {
+            ExposedPort exposedPort = ExposedPort.tcp(GUI_PORT);
+            exposedPorts.add(exposedPort);
+            portBindings.bind(exposedPort, Ports.Binding.bindPort(guiHostPort));
+        }
+
+        if (!exposedPorts.isEmpty()) {
+            createCmd.withExposedPorts(exposedPorts)
                     .withHostConfig(new HostConfig().withPortBindings(portBindings));
         }
 
@@ -249,9 +273,10 @@ public class DockerService {
             throw e;
         }
 
-        log.info("🧰 안전 실행 컨테이너 준비: {} (내부 포트: {}, 매핑 포트: {})", containerId, internalPort, hostPort);
+        log.info("🧰 안전 실행 컨테이너 준비: {} (내부 포트: {}, 매핑 포트: {}, 화면 포트: {})",
+                containerId, internalPort, hostPort, guiHostPort);
 
-        return new Workbench(containerId, hostPort);
+        return new Workbench(containerId, hostPort, guiHostPort);
     }
 
     /** 호스트 폴더의 내용을 컨테이너의 /app 에 덮어쓴다. 폴더에 없는 파일은 건드리지 않는다. */
