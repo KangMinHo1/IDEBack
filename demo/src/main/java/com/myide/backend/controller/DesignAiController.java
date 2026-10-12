@@ -1,15 +1,18 @@
 package com.myide.backend.controller;
 
 import com.myide.backend.dto.design.v2.DesignDetailRequest;
+import com.myide.backend.dto.design.v2.DesignDraftJobResponse;
 import com.myide.backend.dto.design.v2.DesignDraftRequest;
 import com.myide.backend.dto.design.v2.DesignDraftResponse;
 import com.myide.backend.dto.design.v2.DesignModelV2;
 import com.myide.backend.dto.design.v2.TechStackV2;
 import com.myide.backend.security.WorkspaceAccessGuard;
+import com.myide.backend.service.design.ai.DesignDraftJobService;
 import com.myide.backend.service.design.ai.DesignDraftService;
 import com.myide.backend.service.design.doctor.DesignDoctorService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
@@ -28,6 +31,7 @@ import org.springframework.web.server.ResponseStatusException;
 public class DesignAiController {
 
     private final DesignDraftService draftService;
+    private final DesignDraftJobService draftJobService;
     private final DesignDoctorService doctorService;
     private final WorkspaceAccessGuard accessGuard;
 
@@ -76,6 +80,52 @@ public class DesignAiController {
                 request.skeleton(), request.instruction(), request.existing());
 
         return new DesignDraftResponse(model, doctorService.inspect(model));
+    }
+
+    /**
+     * 두 단계를 서버가 이어서 만든다. 곧바로 돌아오고, 결과는 아래 GET 으로 찾아간다.
+     *
+     * 화면을 떠나도 계속 만들어지게 하려고 생겼다. 끝나면 알림이 남는다.
+     */
+    @PostMapping("/workspaces/{workspaceId}/design/ai/draft-job")
+    public DesignDraftJobResponse startDraftJob(
+            @PathVariable String workspaceId,
+            @AuthenticationPrincipal Long userId,
+            @RequestBody DesignDraftRequest request
+    ) {
+        accessGuard.requireAccess(workspaceId, userId);
+        requireAi();
+
+        if (request == null || request.summary() == null || request.summary().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "어떤 서비스를 만들지 한 줄로 적어 주세요.");
+        }
+
+        return draftJobService.start(userId, workspaceId, request);
+    }
+
+    /** 내 초안 작업의 지금 상태. 없으면 204. */
+    @GetMapping("/workspaces/{workspaceId}/design/ai/draft-job")
+    public ResponseEntity<DesignDraftJobResponse> draftJob(
+            @PathVariable String workspaceId,
+            @AuthenticationPrincipal Long userId
+    ) {
+        accessGuard.requireAccess(workspaceId, userId);
+
+        DesignDraftJobResponse job = draftJobService.get(userId, workspaceId);
+        return job == null ? ResponseEntity.noContent().build() : ResponseEntity.ok(job);
+    }
+
+    /** 문서에 넣었거나 버렸을 때 치운다. */
+    @DeleteMapping("/workspaces/{workspaceId}/design/ai/draft-job")
+    public ResponseEntity<Void> discardDraftJob(
+            @PathVariable String workspaceId,
+            @AuthenticationPrincipal Long userId
+    ) {
+        accessGuard.requireAccess(workspaceId, userId);
+        draftJobService.discard(userId, workspaceId);
+
+        return ResponseEntity.noContent().build();
     }
 
     /** AI 설정이 없을 때 빈 화면 대신 이유를 알려 준다. */
