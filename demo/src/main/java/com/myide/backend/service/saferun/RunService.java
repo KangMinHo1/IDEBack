@@ -181,7 +181,8 @@ public class RunService {
         boolean isSpringBoot = request.templateType() == TemplateType.SPRING_BOOT;
 
         // 실행 도중에도 편집은 계속 들어온다. 조립과 판단이 같은 장부를 보도록 사본을 뜬다.
-        Map<String, Set<Long>> ledgerSnapshot = ledger.snapshot(key);
+        // 본인이 고친 뒤 다른 사람이 이어서 고친 파일은 그 사람의 파일로 본다(snapshotFor).
+        Map<String, Set<Long>> ledgerSnapshot = ledger.snapshotFor(key, request.requester());
 
         RunPlanner planner = new RunPlanner(
                 ledgerSnapshot,

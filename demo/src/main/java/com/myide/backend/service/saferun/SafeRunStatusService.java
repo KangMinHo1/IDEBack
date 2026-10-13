@@ -30,7 +30,11 @@ public class SafeRunStatusService {
             String projectName,
             String branchName,
             Long greenUpdatedAt,
-            List<AuthorView> authors
+            List<AuthorView> authors,
+            /** 지금 문법 오류가 있는 파일. 누가 고쳤는지는 authors 의 files 로 찾는다. */
+            List<String> brokenFiles,
+            /** 파일마다 마지막으로 고친 사람(파일경로 → 회원번호). */
+            Map<String, Long> lastEditors
     ) {}
 
     private final EditLedger ledger;
@@ -80,7 +84,9 @@ public class SafeRunStatusService {
                 key.projectName(),
                 key.branchName(),
                 readGreenUpdatedAt(key),
-                authors
+                authors,
+                List.copyOf(authorStatusService.brokenFiles(key)),
+                ledger.lastEditors(key)
         );
     }
 

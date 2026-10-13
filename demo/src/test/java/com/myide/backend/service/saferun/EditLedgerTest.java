@@ -121,6 +121,35 @@ class EditLedgerTest {
     }
 
     @Test
+    @DisplayName("내가 고친 뒤 팀원이 이어서 고친 파일은 내 실행에서 팀원의 파일로 본다")
+    void treatsFileAsTheLastEditorsForTheRequester() {
+        ledger.record(DEVELOP, "Shared.java", 1L);
+        ledger.record(DEVELOP, "Shared.java", 2L);
+        ledger.record(DEVELOP, "Mine.java", 2L);
+        ledger.record(DEVELOP, "Mine.java", 1L);
+
+        // 1번이 실행하면: 2번이 이어서 고친 Shared.java 에서는 이름이 빠지고,
+        // 자기가 마지막으로 고친 Mine.java 는 함께 고친 파일 그대로다.
+        var mine = ledger.snapshotFor(DEVELOP, 1L);
+        assertThat(mine.get("Shared.java")).containsExactly(2L);
+        assertThat(mine.get("Mine.java")).containsExactlyInAnyOrder(1L, 2L);
+
+        // 전체 장부에는 작성자가 그대로 남는다.
+        assertThat(ledger.authorsOf(DEVELOP, "Shared.java")).containsExactlyInAnyOrder(1L, 2L);
+    }
+
+    @Test
+    @DisplayName("마지막으로 고친 사람이 바뀌면 true 를 돌려준다")
+    void reportsWhenTheLastEditorChanges() {
+        ledger.record(DEVELOP, "Main.java", 1L);
+        ledger.record(DEVELOP, "Main.java", 2L);
+
+        // 둘 다 이미 작성자지만, 화면의 실행 버전 예상이 달라지므로 알려야 한다.
+        assertThat(ledger.record(DEVELOP, "Main.java", 1L)).isTrue();
+        assertThat(ledger.record(DEVELOP, "Main.java", 1L)).isFalse();
+    }
+
+    @Test
     @DisplayName("여럿이 동시에 적어도 빠지는 작성자가 없다")
     void isSafeUnderConcurrency() throws Exception {
         int writers = 32;

@@ -44,6 +44,8 @@ public class SafeRunBroadcaster implements AuthorStatusService.ChangeListener {
         message.put("branchName", view.branchName());
         message.put("greenUpdatedAt", view.greenUpdatedAt());
         message.put("authors", view.authors());
+        message.put("brokenFiles", view.brokenFiles());
+        message.put("lastEditors", view.lastEditors());
 
         workspaceEventHandler.broadcastToBranch(
                 key.workspaceId(), key.projectName(), key.branchName(), message);
