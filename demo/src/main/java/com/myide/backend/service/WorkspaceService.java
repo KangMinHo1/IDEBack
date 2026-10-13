@@ -31,8 +31,12 @@ import com.myide.backend.repository.design.DesignRequirementRepository;
 import com.myide.backend.repository.workspace.WorkspaceMemberRepository;
 import com.myide.backend.repository.workspace.WorkspaceRepository;
 
+import com.myide.backend.service.saferun.RunAssembler;
+import com.myide.backend.service.saferun.SafeRunPaths;
+
 import lombok.RequiredArgsConstructor;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -128,6 +132,14 @@ public class WorkspaceService {
     private final UserSpaceService userSpaceService;
 
     private final CurrentUserService currentUserService;
+
+
+    /*
+     * 안전 실행·샌드박스 폴더의 루트. 워크스페이스를 지울 때 그 워크스페이스 몫을
+     * 함께 지우는 데만 쓴다. 경로 규칙의 정본은 SafeRunPaths 다.
+     */
+    @Value("${ide.safe-run-root}")
+    private String safeRunRoot;
 
 
     /*
@@ -1058,6 +1070,10 @@ public class WorkspaceService {
                                     deleteWorkspaceDirectorySafely(
                                             workspaceRoot
                                     );
+
+                                    deleteSafeRunDirectorySafely(
+                                            workspaceId
+                                    );
                                 }
                             }
                     );
@@ -1066,6 +1082,36 @@ public class WorkspaceService {
 
             deleteWorkspaceDirectorySafely(
                     workspaceRoot
+            );
+
+            deleteSafeRunDirectorySafely(
+                    workspaceId
+            );
+        }
+    }
+
+
+    /*
+     * 안전 실행·샌드박스 폴더(green / sandbox)는 워크스페이스 폴더 밖에 따로 있다.
+     * 워크스페이스를 지울 때 같이 지우지 않으면 주인 없는 폴더가 디스크에 계속 남는다.
+     *
+     * 실패해도 워크스페이스 삭제 자체는 이미 끝났으므로 예외를 밖으로 내지 않는다.
+     */
+    private void deleteSafeRunDirectorySafely(
+            String workspaceId
+    ) {
+
+        try {
+            RunAssembler.deleteRecursively(
+                    SafeRunPaths.workspaceRoot(
+                            safeRunRoot,
+                            workspaceId
+                    )
+            );
+        } catch (Exception e) {
+            System.out.println(
+                    "[Workspace 삭제] 안전 실행 폴더 삭제 실패: "
+                            + e.getMessage()
             );
         }
     }

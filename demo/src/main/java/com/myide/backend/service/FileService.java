@@ -177,7 +177,11 @@ public class FileService {
         }
     }
 
-    public void saveFile(FileRequest request) {
+    /**
+     * @return 실제로 디스크에 썼으면 true. 아래 방어에 걸려 쓰지 않았으면 false.
+     *         부르는 쪽이 "저장된 내용"을 근거로 무언가 할 때(문법 검사 등) 구분해야 한다.
+     */
+    public boolean saveFile(FileRequest request) {
         String branchName = normalizeBranchName(request.getBranchName());
 
         Path target = getSecureTargetPath(
@@ -188,6 +192,22 @@ public class FileService {
         );
 
         try {
+            // 동시편집의 자동 저장은 없는 파일을 새로 만들지 않는다.
+            //
+            // 팀원이 파일을 지우면 그 파일을 열어 둔 다른 사람의 탭이 닫히는데, 닫히면서
+            // 아직 저장하지 않은 내용을 마지막으로 한 번 저장한다. 그 저장이 방금 지운
+            // 파일을 되살렸다. 이름을 바꿨을 때 옛 이름의 파일이 다시 생기는 것도 같은
+            // 원인이다.
+            //
+            // 자동 저장만 allowEmpty=false 를 실어 보내므로 그것으로 가린다. 파일은 항상
+            // createFile 로 먼저 만들어진 뒤에 열리므로, 자동 저장이 없는 파일에 쓰는
+            // 것은 "지워진 파일"뿐이다. 사용자가 직접 누른 저장과 실행 전 저장은 이
+            // 값이 없거나 true 라 지금처럼 파일을 만든다.
+            if (Boolean.FALSE.equals(request.getAllowEmpty()) && !Files.exists(target)) {
+                log.warn("⚠️ [File] 지워진 파일에 대한 자동 저장을 막았습니다: {}", target);
+                return false;
+            }
+
             if (target.getParent() != null && !Files.exists(target.getParent())) {
                 Files.createDirectories(target.getParent());
             }
@@ -212,7 +232,7 @@ public class FileService {
                     && Files.size(target) > 0) {
 
                 log.warn("⚠️ [File] 빈 내용 저장을 막았습니다: {}", target);
-                return;
+                return false;
             }
 
             Files.writeString(target, code, StandardCharsets.UTF_8);
@@ -222,6 +242,8 @@ public class FileService {
                     request.getProjectName(),
                     branchName
             );
+
+            return true;
 
         } catch (IOException e) {
             throw new RuntimeException("파일 저장 실패: " + e.getMessage(), e);

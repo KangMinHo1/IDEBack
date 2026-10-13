@@ -6,6 +6,11 @@ import com.myide.backend.domain.LanguageType;
 import com.myide.backend.domain.workspace.TemplateType; // 💡 새롭게 만든 Enum 임포트!
 import com.myide.backend.service.DockerService;
 import com.myide.backend.service.WorkspaceService;
+import com.myide.backend.security.JwtProvider;
+import com.myide.backend.security.WorkspaceAccessGuard;
+import com.myide.backend.service.saferun.BranchKey;
+import com.myide.backend.service.saferun.RunCommands;
+import com.myide.backend.service.saferun.RunService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -15,6 +20,8 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import java.nio.file.Path;
+import java.util.HashSet;
+import java.util.Set;
 
 @Slf4j
 @Component
@@ -24,6 +31,9 @@ public class RunWebSocketHandler extends TextWebSocketHandler {
     private final DockerService dockerService;
     private final ObjectMapper objectMapper;
     private final WorkspaceService workspaceService;
+    private final RunService runService;
+    private final JwtProvider jwtProvider;
+    private final WorkspaceAccessGuard accessGuard;
 
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
@@ -32,6 +42,8 @@ public class RunWebSocketHandler extends TextWebSocketHandler {
 
         // 컨테이너 종료 요청
         if ("STOP".equals(type)) {
+            // 안전 실행이 다음 빌드로 넘어가지 않게 먼저 알린다.
+            runService.cancel(session.getId());
             dockerService.stopContainer(session.getId());
             return;
         }
@@ -63,6 +75,26 @@ public class RunWebSocketHandler extends TextWebSocketHandler {
 
         log.info("🚀 Run Request: Proj={}, Branch={}, Template={}", projectName, branchName, templateType);
 
+        // 안전 실행: 누가 실행했는지 알 수 있고(token) 컴파일 단계가 있는 유형일 때만.
+        // 조건에 안 맞으면 아래의 기존 실행으로 그대로 간다. 토큰을 보내지 않는 예전
+        // 프론트와, 안전 실행을 적용하지 않는 유형이 전과 똑같이 동작해야 하기 때문이다.
+        Long requester = resolveRequester(json, workspaceId);
+
+        if (requester != null && RunCommands.supports(templateType, language)) {
+            runService.start(session, new RunService.Request(
+                    BranchKey.of(workspaceId, projectName, branchName),
+                    filePath,
+                    language,
+                    templateType,
+                    requester,
+                    readUserIds(json, "includeAuthors"),
+                    readUserIds(json, "excludeAuthors"),
+                    json.path("sandbox").asBoolean(false),
+                    json.path("safeRunInfo").asBoolean(false)
+            ));
+            return;
+        }
+
         // 💡 [버그 해결 포인트 2] 7개의 파라미터를 정확하게 다 채워서 DockerService로 넘깁니다!
         int mappedPort = dockerService.runProject(
                 session, workspaceId, projectName, branchName, filePath, language, templateType
@@ -75,8 +107,40 @@ public class RunWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
+    /**
+     * 실행한 사람의 회원번호. 알 수 없으면 null.
+     *
+     * /ws/run 에는 접속 인증이 없다. 그래서 "실행한 본인의 변경은 빼지 않는다"를
+     * 지키려면 RUN 메시지에 토큰을 실어 보내야 한다. 토큰이 없거나 틀렸거나 그
+     * 워크스페이스의 멤버가 아니면 본인을 알 수 없으므로 안전 실행을 하지 않는다.
+     */
+    private Long resolveRequester(JsonNode json, String workspaceId) {
+        String token = json.path("token").asText("");
+
+        if (token.isBlank() || !jwtProvider.validateAccessToken(token)) {
+            return null;
+        }
+
+        Long userId = jwtProvider.getUserIdFromToken(token);
+
+        return accessGuard.hasAccess(workspaceId, userId) ? userId : null;
+    }
+
+    private Set<Long> readUserIds(JsonNode json, String field) {
+        Set<Long> userIds = new HashSet<>();
+
+        for (JsonNode node : json.path(field)) {
+            if (node.canConvertToLong()) {
+                userIds.add(node.asLong());
+            }
+        }
+
+        return userIds;
+    }
+
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) throws Exception {
+        runService.cancel(session.getId());
         dockerService.stopContainer(session.getId());
     }
 }

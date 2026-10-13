@@ -525,10 +525,12 @@ public class DesignDraftService {
 
     private JsonNode call(String prompt, Map<String, Object> schema, int maxTokens) {
         String raw;
+        long startedAt = System.currentTimeMillis();
 
         try {
             raw = gemini.generate(prompt,
                     GeminiHttpClient.GenerationOptions.json(maxTokens, schema));
+            log.info("⏱️ [AI] 초안 호출 {}ms", System.currentTimeMillis() - startedAt);
         } catch (GeminiHttpClient.ResponseTruncatedException e) {
             throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
                     "AI 응답이 너무 길어 잘렸습니다. 설명을 조금 더 좁혀서 다시 시도해 주세요.");

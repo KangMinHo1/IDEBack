@@ -215,7 +215,7 @@ public class GeminiHttpClient {
                 : url + "?key=" + encodedKey;
     }
 
-    private String buildRequestBody(String prompt, GenerationOptions options) {
+    String buildRequestBody(String prompt, GenerationOptions options) {
         Map<String, Object> part = new LinkedHashMap<>();
         part.put("text", prompt);
 
@@ -226,6 +226,14 @@ public class GeminiHttpClient {
         generationConfig.put("temperature", options.temperature());
         generationConfig.put("topP", options.topP());
         generationConfig.put("maxOutputTokens", options.maxOutputTokens());
+
+        // 답을 쓰기 전의 "생각 단계"를 끈다. 2.5 Flash 는 기본으로 이 단계를
+        // 거치는데, 설계 초안은 호출마다 그 시간이 그대로 붙어 대기가 두 배
+        // 가까이 길어졌다. 모양은 responseSchema 가 강제하고 id·타입·연결은
+        // 서버 후처리가 맞추므로 꺼도 결과가 깨지지 않는다.
+        // 0 은 2.5 Flash 전용 값이다. google.gemini.url 을 2.5 Pro 로 바꾸면
+        // 400 으로 거부되므로 이 줄도 함께 고쳐야 한다.
+        generationConfig.put("thinkingConfig", Map.of("thinkingBudget", 0));
 
         if (options.responseSchema() != null) {
             generationConfig.put("responseMimeType", "application/json");

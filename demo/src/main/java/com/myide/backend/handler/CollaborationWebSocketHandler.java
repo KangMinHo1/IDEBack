@@ -2,7 +2,12 @@
 package com.myide.backend.handler;
 
 import com.myide.backend.config.WebSocketConfig;
+import com.myide.backend.security.CollabHandshakeInterceptor;
+import com.myide.backend.security.CollabRoomName;
+import com.myide.backend.service.saferun.CollabEditListener;
+import com.myide.backend.service.saferun.YjsMessageKind;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.BinaryMessage;
 import org.springframework.web.socket.CloseStatus;
@@ -40,6 +45,19 @@ public class CollaborationWebSocketHandler extends BinaryWebSocketHandler {
      */
     private final Map<String, String> roomDocs = new ConcurrentHashMap<>();
 
+    /**
+     * 편집이 일어났음을 듣는 쪽(안전 실행의 편집 장부).
+     *
+     * 생성자가 아니라 세터로 받는 이유는, 이 핸들러가 듣는 쪽 없이도 중계기로서
+     * 온전히 동작해야 하기 때문이다(테스트도 그렇게 만든다).
+     */
+    private CollabEditListener editListener;
+
+    @Autowired(required = false)
+    public void setEditListener(CollabEditListener editListener) {
+        this.editListener = editListener;
+    }
+
     @Override
     public void afterConnectionEstablished(WebSocketSession session) {
         // 컨테이너 기본값과 별개로 스프링 쪽 세션 한도가 따로 걸린다.
@@ -69,12 +87,64 @@ public class CollaborationWebSocketHandler extends BinaryWebSocketHandler {
         String room = getRoomName(session);
         Set<WebSocketSession> roomSessions = rooms.get(room);
 
+        notifyEdit(session, room, message);
+
+        // awareness 는 보낸 사람에게도 돌려준다.
+        //
+        // y-websocket 클라이언트는 30초 동안 아무 메시지도 못 받으면 연결이 죽은 줄
+        // 알고 끊었다가 다시 붙는다. 방에 혼자 있으면 받을 것이 없어 30초마다 끊겼고,
+        // 그때마다 방이 비어 보관 문서가 지워졌다. 그 사이 다른 사람이 같은 파일을
+        // 열면 디스크 내용으로 원본을 새로 만들어, 남아 있던 옛 원본과 합쳐지면서
+        // 내용이 두 번 들어갔다. 자기 awareness(15초마다 자동 갱신)가 돌아오면 끊기지
+        // 않는다. 표준 y-websocket 서버도 이렇게 하고, 클라이언트는 자기 상태를 무시한다.
+        //
+        // 문서 동기화 메시지는 돌려주지 않는다. 돌려받으면 쓸데없는 왕복만 생긴다.
+        boolean echoToSender = YjsMessageKind.isAwareness(message.getPayload());
+
         if (roomSessions != null) {
             for (WebSocketSession s : roomSessions) {
-                if (s.isOpen() && !s.getId().equals(session.getId())) {
+                if (s.isOpen() && (echoToSender || !s.getId().equals(session.getId()))) {
                     s.sendMessage(message);
                 }
             }
+        }
+    }
+
+    /**
+     * 코드 파일을 고친 메시지면 "누가 어느 파일을 고쳤는지"를 알린다.
+     *
+     * 내용은 여전히 해석하지 않는다. 메시지 앞의 종류 표시와, 접속할 때 확인해 둔
+     * 회원번호만 본다. 회원번호가 없는 접속(인증을 끈 경우)은 누구인지 알 수 없으므로
+     * 알리지 않는다.
+     *
+     * 여기서 무슨 일이 나도 중계는 계속돼야 한다. 그래서 예외를 삼킨다.
+     */
+    private void notifyEdit(WebSocketSession session, String room, BinaryMessage message) {
+        if (editListener == null) {
+            return;
+        }
+
+        try {
+            if (!YjsMessageKind.isDocumentEdit(message.getPayload())) {
+                return;
+            }
+
+            CollabRoomName.FileRoom fileRoom = CollabRoomName.parseFileRoom(room);
+            Object userId = session.getAttributes().get(CollabHandshakeInterceptor.ATTR_USER_ID);
+
+            if (fileRoom == null || !(userId instanceof Long authorId)) {
+                return;
+            }
+
+            editListener.onEdit(
+                    fileRoom.workspaceId(),
+                    fileRoom.projectName(),
+                    fileRoom.branchName(),
+                    fileRoom.filePath(),
+                    authorId
+            );
+        } catch (RuntimeException e) {
+            log.warn("⚠️ [Collab] 편집 기록 실패: 방 = {}, 이유 = {}", room, e.getMessage());
         }
     }
 
@@ -138,6 +208,60 @@ public class CollaborationWebSocketHandler extends BinaryWebSocketHandler {
         }
 
         roomDocs.put(room, yjsUpdate);
+    }
+
+    /**
+     * 이 방이 열려 있는가 — 누군가 접속해 있거나, 보관 중인 문서가 있는가.
+     *
+     * 문서까지 보는 이유: 파일을 여는 쪽은 문서를 먼저 등록(시드)하고 그 다음에 접속한다.
+     * 접속자만 보면 그 사이의 방을 닫힌 것으로 잘못 본다.
+     */
+    public boolean isRoomOpen(String room) {
+        if (room == null || room.isBlank()) {
+            return false;
+        }
+
+        Set<WebSocketSession> sessions = rooms.get(room);
+        return roomDocs.containsKey(room) || (sessions != null && !sessions.isEmpty());
+    }
+
+    /**
+     * 방이 닫혀 있을 때만 작업을 실행한다. 실행했으면 true.
+     *
+     * 서버가 디스크의 파일을 직접 고칠 때 쓴다. 방이 열려 있는데 디스크만 고치면, 그 방의
+     * 문서는 옛 내용 그대로라 누가 한 글자만 쳐도 자동 저장이 옛 내용으로 디스크를 덮는다.
+     *
+     * 확인과 실행 사이에 다른 사람이 이 방의 문서를 등록하지 못하게 묶는다. 다만 이미
+     * 디스크 내용을 읽어 간 뒤 등록만 남겨 둔 사람까지는 막지 못한다(그 틈은 남는다).
+     */
+    public boolean runIfRoomClosed(String room, Runnable action) {
+        boolean[] ran = {false};
+
+        roomDocs.compute(room, (name, doc) -> {
+            Set<WebSocketSession> sessions = rooms.get(name);
+
+            if (doc == null && (sessions == null || sessions.isEmpty())) {
+                action.run();
+                ran[0] = true;
+            }
+
+            return doc;
+        });
+
+        return ran[0];
+    }
+
+    /**
+     * 파일(또는 폴더 아래 전부)의 보관 문서를 버린다. 파일을 지우거나 이름을 바꿨을 때 부른다.
+     *
+     * 버리지 않으면 같은 이름으로 다시 만든 파일을 여는 사람이 지워진 파일의 옛 문서를 받는다.
+     */
+    public void dropDocsUnder(String roomOfPath) {
+        if (roomOfPath == null || roomOfPath.isBlank()) {
+            return;
+        }
+
+        roomDocs.keySet().removeIf(room -> room.equals(roomOfPath) || room.startsWith(roomOfPath + "/"));
     }
 
     /** 시드 결과. accepted 가 false 면 이미 있던 문서를 돌려준 것이다. */

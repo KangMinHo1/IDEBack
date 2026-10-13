@@ -39,6 +39,9 @@ spring:
 
 ide:
   users-root: ${IDE_USERS_ROOT:C:\WebIDE\users}
+  # 안전 실행·샌드박스가 쓰는 폴더(green / sandbox / runs). 사용자 개인 폴더 밖에 둔다.
+  # 운영(Linux)에서는 IDE_SAFE_RUN_ROOT 로 반드시 지정한다.
+  safe-run-root: ${IDE_SAFE_RUN_ROOT:C:\WebIDE\safe-run}
 
 app:
   public-base-url: ${APP_PUBLIC_BASE_URL:http://localhost:8080}

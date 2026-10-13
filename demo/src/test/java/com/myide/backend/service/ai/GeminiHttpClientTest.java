@@ -63,4 +63,15 @@ class GeminiHttpClientTest {
 
         assertThat(client.describeFailure(500, null)).contains("500");
     }
+
+    @Test
+    @DisplayName("생각 단계를 끈 채로 요청한다")
+    void disablesThinking() throws Exception {
+        String body = client.buildRequestBody("안녕",
+                GeminiHttpClient.GenerationOptions.json(1024, null));
+
+        assertThat(new ObjectMapper().readTree(body)
+                .path("generationConfig").path("thinkingConfig").path("thinkingBudget").asInt(-1))
+                .isZero();
+    }
 }
