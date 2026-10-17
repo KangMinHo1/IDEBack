@@ -12,6 +12,7 @@ import com.github.dockerjava.core.command.AttachContainerResultCallback;
 import com.github.dockerjava.core.command.WaitContainerResultCallback;
 import com.myide.backend.domain.LanguageType;
 import com.myide.backend.domain.workspace.TemplateType;
+import com.myide.backend.service.saferun.DesktopTyping;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -538,6 +539,36 @@ public class DockerService {
             } catch (Exception e) {
                 log.error("도커 exec 입력 전송 실패", e);
             }
+        }
+    }
+
+    /**
+     * 앱 화면(Swing)에서 지금 포커스가 있는 칸에 글자를 대신 친다. 한글 입력용이다(DesktopTyping).
+     * 화면을 켠 실행(ide-gui-start 가 :99 를 띄운 컨테이너)에서만 의미가 있다.
+     */
+    public void typeIntoDesktop(String sessionId, String text) {
+        String containerId = runningContainerMap.get(sessionId);
+        String[] command = DesktopTyping.command(text);
+
+        if (containerId == null || command == null) {
+            return;
+        }
+
+        try {
+            String execId = dockerClient.execCreateCmd(containerId)
+                    .withEnv(List.of("DISPLAY=:99"))
+                    .withCmd(command)
+                    .withAttachStdout(false)
+                    .withAttachStderr(false)
+                    .exec().getId();
+
+            dockerClient.execStartCmd(execId).exec(new AttachContainerResultCallback())
+                    .awaitCompletion(30, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (RuntimeException e) {
+            // 실행이 끝나 컨테이너가 사라진 경우가 대부분이다. 입력 하나 놓친 것뿐이라 실행은 그대로 둔다.
+            log.warn("앱 화면 글자 입력 실패: {}", e.getMessage());
         }
     }
 

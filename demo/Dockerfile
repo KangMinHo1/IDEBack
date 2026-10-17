@@ -75,6 +75,8 @@ RUN wget https://services.gradle.org/distributions/gradle-8.5-bin.zip -P /tmp \
 #   x11vnc     그 화면을 원격 화면(VNC) 신호로 내보낸다
 #   novnc      VNC 를 브라우저가 볼 수 있는 웹 페이지로 바꾼다 (IDE 의 미리보기 창에 뜬다)
 #   fonts-nanum 한글 글꼴. 없으면 한글이 네모로 나온다
+#   xdotool    글자를 대신 친다. 화면 중계는 누른 키만 보내 한글이 조합되지 않으므로,
+#              앱 화면의 한글 입력 칸에서 받은 글자를 이것으로 창에 넣는다(DesktopTyping)
 RUN apt-get update && apt-get install -y \
     xvfb \
     openbox \
@@ -82,6 +84,7 @@ RUN apt-get update && apt-get install -y \
     novnc \
     websockify \
     fonts-nanum \
+    xdotool \
     && rm -rf /var/lib/apt/lists/*
 
 # 화면을 켜는 스크립트. 서버(RunService)가 창을 쓰는 프로그램을 실행하기 직전에 부른다.
