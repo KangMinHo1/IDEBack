@@ -112,13 +112,26 @@ RUN printf '%s\n' \
 # 안 /root/.gradle 에 남는다. 컨테이너마다 그 사본을 쓰므로, 여러 컨테이너가 캐시 하나를 같이
 # 쓸 때와 달리 누군가의 코드가 캐시를 바꿔도 다른 실행에 번지지 않는다.
 # 템플릿의 스프링부트 버전을 바꾸면 여기도 같이 바꾸고 이미지를 다시 빌드해야 빨라진다.
+# 작업 폴더를 만들 때 고를 수 있는 의존성(SpringDependency)과, 설계 코드 생성이 덧붙이는
+# JPA·Lombok·H2 도 같이 받아 둔다. 그 목록에 항목을 늘리면 여기에도 넣는다.
 #
 # gradle 일꾼(데몬)은 실행마다 새로 켜지는데, 켜질 때 최적화를 덜 하게(TieredStopAtLevel=1)
 # 하면 첫 빌드가 17초에서 12초 정도로 준다. 빌드 도구라 오래 돌지 않아서 손해가 없다.
 RUN mkdir -p /root/.gradle /tmp/warm/src/main/java/com/example/demo \
     && printf '%s\n' 'org.gradle.jvmargs=-Xmx1g -XX:TieredStopAtLevel=1 -XX:+UseParallelGC' \
         > /root/.gradle/gradle.properties \
-    && printf "plugins { id 'org.springframework.boot' version '3.2.0'; id 'io.spring.dependency-management' version '1.1.4'; id 'java' }\nrepositories { mavenCentral() }\ndependencies { implementation 'org.springframework.boot:spring-boot-starter-web' }\n" \
+    && printf '%s\n' \
+        "plugins { id 'org.springframework.boot' version '3.2.0'; id 'io.spring.dependency-management' version '1.1.4'; id 'java' }" \
+        "repositories { mavenCentral() }" \
+        "dependencies {" \
+        "    implementation 'org.springframework.boot:spring-boot-starter-web'" \
+        "    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'" \
+        "    implementation 'org.springframework.boot:spring-boot-starter-validation'" \
+        "    runtimeOnly 'com.h2database:h2'" \
+        "    runtimeOnly 'com.mysql:mysql-connector-j'" \
+        "    compileOnly 'org.projectlombok:lombok'" \
+        "    annotationProcessor 'org.projectlombok:lombok'" \
+        "}" \
         > /tmp/warm/build.gradle \
     && printf '%s\n' 'package com.example.demo;' \
         '@org.springframework.boot.autoconfigure.SpringBootApplication' \

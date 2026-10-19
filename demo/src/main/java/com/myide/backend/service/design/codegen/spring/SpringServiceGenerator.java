@@ -20,6 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -109,6 +110,14 @@ public class SpringServiceGenerator implements DesignCodeGenerator {
                 .orElse("Long");
     }
 
+    /** 엔티티의 @Id 필드 이름. SpringEntityGenerator 가 첫 번째 PK 칸으로 짓는 이름과 같다. */
+    private Optional<String> pkFieldOf(TableV2 table) {
+        return table.columns().stream()
+                .filter(ColumnV2::isPk)
+                .findFirst()
+                .map(column -> NameMapper.toFieldName(column.name()));
+    }
+
     private String render(TableV2 table, String entityName, Set<CrudShape.Kind> kinds,
                           CodegenOptions options) {
         Set<String> imports = new LinkedHashSet<>();
@@ -129,7 +138,9 @@ public class SpringServiceGenerator implements DesignCodeGenerator {
             methods.append("\n    public ").append(entityName).append(" findById(")
                     .append(idType).append(" id) {\n");
             methods.append("        return ").append(repositoryField).append(".findById(id)\n");
-            methods.append("                .orElseThrow(() -> new IllegalArgumentException(\"")
+            // 없으면 404 로 답한다. IllegalArgumentException 을 던지면 "없음"이 서버 고장(500)으로 보여
+            // 부르는 화면이 둘을 구분하지 못했다.
+            methods.append("                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, \"")
                     .append(table.name()).append(" 를 찾을 수 없습니다: \" + id));\n");
             methods.append("    }\n");
         }
@@ -148,6 +159,11 @@ public class SpringServiceGenerator implements DesignCodeGenerator {
                     .append(field).append(") {\n");
             methods.append("        // 있는지 먼저 확인한다. 없는 id 로 save 하면 고치는 대신 새로 만들어진다.\n");
             methods.append("        findById(id);\n");
+            // 요청 본문에는 보통 id 가 없다. 그대로 save 하면 고치는 대신 새 줄이 생겼다.
+            pkFieldOf(table).ifPresent(pk -> methods
+                    .append("        ").append(field).append(".set")
+                    .append(Character.toUpperCase(pk.charAt(0))).append(pk.substring(1))
+                    .append("(id);\n"));
             methods.append("        return ").append(repositoryField).append(".save(")
                     .append(field).append(");\n");
             methods.append("    }\n");
@@ -165,7 +181,9 @@ public class SpringServiceGenerator implements DesignCodeGenerator {
                 .append(entityName).append(";\n");
         builder.append("import ").append(options.basePackage()).append(".repository.")
                 .append(entityName).append("Repository;\n");
+        builder.append("import org.springframework.http.HttpStatus;\n");
         builder.append("import org.springframework.stereotype.Service;\n");
+        builder.append("import org.springframework.web.server.ResponseStatusException;\n");
 
         if (kinds.contains(CrudShape.Kind.FIND_ALL)) {
             builder.append("import java.util.List;\n");

@@ -17,6 +17,11 @@ public enum CodegenTarget {
     SPRING_SERVICE(ProjectStack.SPRING, "Service"),
     SPRING_CONTROLLER_DTO(ProjectStack.SPRING, "Controller / DTO"),
     DDL(ProjectStack.SPRING, "테이블 생성 SQL"),
+    /*
+     * 생성기가 만들지 않는다. 만든 코드가 JPA·Lombok 을 쓰므로 DesignCodegenService 가
+     * 지금 build.gradle 을 읽어 빠진 의존성을 덧붙이고, DB 설정이 없으면 만든다.
+     */
+    SPRING_SETUP(ProjectStack.SPRING, "실행 준비 (의존성 · DB 설정)"),
 
     REACT_ROUTE(ProjectStack.REACT, "라우트"),
     REACT_PAGE(ProjectStack.REACT, "화면 뼈대"),

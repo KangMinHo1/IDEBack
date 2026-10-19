@@ -4,11 +4,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.myide.backend.dto.aiassist.AiAssistRequest;
 import com.myide.backend.dto.aiassist.AiAssistResponse;
 import com.myide.backend.dto.codemap.CodeMapResponse;
+import com.myide.backend.service.ai.ProjectContextExtractor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -19,6 +21,7 @@ public class AiAssistService {
     private final CodeMapService codeMapService;
     private final CoreAiService coreAiService; // 💡 공통 통신 모듈 주입!
     private final ObjectMapper objectMapper;
+    private final ProjectContextExtractor projectContextExtractor;
 
     public AiAssistResponse getAiSuggestion(AiAssistRequest req) {
         try {
@@ -27,20 +30,32 @@ public class AiAssistService {
                     req.getWorkspaceId(), req.getProjectName(), req.getBranchName(), "JAVA");
 
             String projectContext = formatContext(contextMap);
+            // 클래스 이름만으로는 AI 가 API 주소와 필드 이름을 짐작해서 썼다. 실제 주소·필드·의존성·
+            // 실행 환경을 함께 넘겨 프로젝트에 맞는 코드를 쓰게 한다(ProjectContextExtractor).
+            String projectFacts = projectContextExtractor.summarize(
+                    req.getWorkspaceId(), req.getProjectName(), req.getBranchName());
 
             String prompt = String.format(
-                    "You are a Senior Java Developer. You MUST respond ONLY in valid JSON format. Do NOT add any markdown formatting like ```json or any plain text outside the JSON.\n\n" +
-                            "【JSON FORMAT】\n" +
-                            "{\n" +
-                            "  \"explanation\": \"여기에 답변을 작성해. 단, 초보자도 이해하기 쉽게 마크다운 불릿(-)을 써서 3문장 이내로 핵심만 요약할 것.\",\n" +
-                            "  \"suggestedCode\": \"수정된 전체 코드를 작성해. (수정이 없거나 단순 질문이면 빈 문자열로 둘 것)\"\n" +
-                            "}\n\n" +
-                            "### Project Context:\n%s\n\n### Target File: %s\n\n### Current Code:\n%s\n\n### User Request: %s",
-                    projectContext, req.getFilePath(), req.getCurrentCode(), req.getUserQuery()
+                    // 코드를 JSON 글자 안에 넣게 하면 Gemini 가 줄바꿈을 그대로 넣어 JSON 이 깨지거나(3번 중 2번),
+                    // JSON 모드를 켜면 줄바꿈을 아예 빼 코드가 한 줄이 됐다(5번 중 4번). 코드 블록으로 받는다.
+                    "You are a Senior Java Developer. Answer in exactly this format and nothing else:\n\n" +
+                            "EXPLANATION:\n" +
+                            "(초보자도 이해하기 쉽게 마크다운 불릿(-)으로 3문장 이내 핵심만, 한국어)\n\n" +
+                            "CODE:\n" +
+                            "```\n" +
+                            "(Target File 의 수정된 전체 코드. 수정이 없거나 단순 질문이면 이 블록을 비워 둘 것)\n" +
+                            "```\n\n" +
+                            "### Project Context:\n%s\n\n" +
+                            "### Project Facts (read from the actual source. When the code calls these APIs or uses these types, " +
+                            "use exactly these paths, HTTP methods and field names. Do not invent endpoints or fields that are not listed. " +
+                            "Use only the listed dependencies and the JDK standard library.):\n%s\n\n" +
+                            "### Target File: %s\n\n### Current Code:\n%s\n\n### User Request: %s",
+                    projectContext, projectFacts.isBlank() ? "없음" : projectFacts,
+                    req.getFilePath(), req.getCurrentCode(), req.getUserQuery()
             );
 
-            // 💡 CoreAiService 호출
-            String rawResponse = coreAiService.generateText(prompt);
+            // 사용자가 화면 앞에서 기다리므로 생각 단계를 끈다(CoreAiService.generateText(prompt, true)).
+            String rawResponse = coreAiService.generateText(prompt, true);
             return parseSuggestionResponse(rawResponse, req.getCurrentCode());
 
         } catch (HttpClientErrorException e) {
@@ -56,6 +71,12 @@ public class AiAssistService {
     }
 
     private AiAssistResponse parseSuggestionResponse(String rawResponse, String originalCode) {
+        Optional<AiAssistResponse> sections = parseSections(rawResponse);
+        if (sections.isPresent()) {
+            return sections.get();
+        }
+
+        // 형식을 안 지키고 예전처럼 JSON 으로 답한 경우.
         try {
             String cleanJson = rawResponse.replaceAll("```json", "").replaceAll("```", "").trim();
             int startIndex = cleanJson.indexOf("{");
@@ -70,6 +91,48 @@ public class AiAssistService {
             log.error("Gemini 응답 파싱 실패", e);
             return buildErrorResponse("AI가 올바른 형식으로 응답하지 않았습니다. 다시 시도해주세요.", originalCode);
         }
+    }
+
+    /**
+     * "EXPLANATION: … CODE: ```…```" 형식을 읽는다. CODE: 가 없으면 비어 있다.
+     *
+     * 코드는 CODE: 뒤 첫 ``` 줄 다음부터 마지막 ``` 앞까지다. 첫 닫는 ``` 에서 끊지 않는 이유는
+     * 코드 안(문자열·주석)에 ``` 가 들어 있어도 잘리지 않게 하기 위해서다.
+     */
+    static Optional<AiAssistResponse> parseSections(String raw) {
+        if (raw == null) {
+            return Optional.empty();
+        }
+
+        int codeAt = raw.indexOf("CODE:");
+        if (codeAt < 0) {
+            return Optional.empty();
+        }
+
+        String explanation = raw.substring(0, codeAt).trim().replaceFirst("^EXPLANATION:\\s*", "").trim();
+        String code;
+        int open = raw.indexOf("```", codeAt);
+        if (open < 0) {
+            code = raw.substring(codeAt + "CODE:".length()).trim();
+        } else {
+            int lineEnd = raw.indexOf('\n', open);
+            int close = raw.lastIndexOf("```");
+            if (lineEnd < 0 || close <= open) {
+                code = "";
+            } else {
+                code = close > lineEnd ? raw.substring(lineEnd + 1, close) : "";
+                code = code.replaceAll("\\s+$", "");
+                if (!code.isEmpty()) {
+                    code += "\n";
+                }
+            }
+        }
+
+        return Optional.of(AiAssistResponse.builder()
+                .success(true)
+                .explanation(explanation)
+                .suggestedCode(code)
+                .build());
     }
 
     private AiAssistResponse buildErrorResponse(String message, String originalCode) {
@@ -92,8 +155,8 @@ public class AiAssistService {
         );
 
         try {
-            // 💡 CoreAiService 호출
-            String aiRaw = coreAiService.generateText(prompt);
+            // 타자를 치는 동안 떠야 하는 제안이라 생각 단계를 끈다. 켜 두면 몇 초씩 늦게 떠 쓸모가 없었다.
+            String aiRaw = coreAiService.generateText(prompt, true);
             return aiRaw.replaceAll("```[a-zA-Z]*\n", "").replaceAll("```", "").trim();
         } catch (HttpClientErrorException e) {
             log.error("💀 [고스트 텍스트 에러] 구글 API가 대답을 거절했습니다! 상태코드: {}", e.getStatusCode());

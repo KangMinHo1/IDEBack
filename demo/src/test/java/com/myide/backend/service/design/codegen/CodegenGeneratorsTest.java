@@ -2,6 +2,7 @@ package com.myide.backend.service.design.codegen;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.myide.backend.dto.design.codegen.GeneratedFile;
+import com.myide.backend.dto.design.v2.ApiSpecV2;
 import com.myide.backend.dto.design.v2.DesignModelV2;
 import com.myide.backend.service.design.codegen.react.ReactApiClientGenerator;
 import com.myide.backend.service.design.codegen.react.ReactPageStubGenerator;
@@ -148,6 +149,26 @@ class CodegenGeneratorsTest {
 
         // 설계에 없는 CRUD 는 만들지 않는다. 쓰지 않는 코드가 남으면 안 된다.
         assertThat(service).doesNotContain("public void delete(");
+    }
+
+    @Test
+    @DisplayName("없는 것을 찾으면 404, 수정은 경로의 id 로 기존 줄을 고친다")
+    void notFoundAndUpdateKeepId() {
+        ApiSpecV2 updateApi = new ApiSpecV2("api_update", "PUT", "/api/posts/{postId}",
+                "글을 고친다", "{\"title\": \"새 제목\"}", "", true, "U",
+                List.of("req_2"), List.of("scr_detail"), List.of("tbl_post"));
+        DesignModelV2 withUpdate = new DesignModelV2(model.schemaVersion(), model.meta(),
+                model.requirements(), model.screens(), model.screenTransitions(),
+                List.of(updateApi), model.erd());
+
+        String service = contentOf(new SpringServiceGenerator().generate(withUpdate, options),
+                "PostService.java");
+
+        assertThat(service).contains("new ResponseStatusException(HttpStatus.NOT_FOUND,");
+        assertThat(service).contains("import org.springframework.web.server.ResponseStatusException;");
+        assertThat(service).doesNotContain("IllegalArgumentException");
+        // 본문에는 id 가 없으니 경로의 id 를 넣어야 새 줄이 아니라 기존 줄이 고쳐진다.
+        assertThat(service).contains("findById(id);\n        post.setId(id);\n        return postRepository.save(post);");
     }
 
     @Test
