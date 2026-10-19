@@ -106,6 +106,7 @@ public class SpringEntityGenerator implements DesignCodeGenerator {
 
         StringBuilder builder = new StringBuilder();
         builder.append("package ").append(options.basePackage()).append(".domain;\n\n");
+        builder.append("import com.fasterxml.jackson.annotation.JsonIgnoreProperties;\n");
         builder.append("import jakarta.persistence.*;\n");
         builder.append("import lombok.*;\n");
 
@@ -117,6 +118,9 @@ public class SpringEntityGenerator implements DesignCodeGenerator {
         builder.append(javadoc(model, table, pks));
         builder.append("@Entity\n");
         builder.append("@Table(name = \"").append(table.name()).append("\")\n");
+        // 생성된 컨트롤러는 엔티티를 그대로 JSON 으로 돌려준다. 관계(@ManyToOne LAZY)는 Hibernate 가
+        // 대신 끼워 둔 프록시라 그 안의 hibernateLazyInitializer 를 JSON 으로 바꾸지 못해 500 이 났다.
+        builder.append("@JsonIgnoreProperties({\"hibernateLazyInitializer\", \"handler\"})\n");
         builder.append("@Getter\n@Setter\n@NoArgsConstructor\n@AllArgsConstructor\n@Builder\n");
         builder.append("public class ").append(entityName).append(" {\n\n");
         builder.append(fields);

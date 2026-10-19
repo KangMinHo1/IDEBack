@@ -55,6 +55,12 @@ public class RunWebSocketHandler extends TextWebSocketHandler {
             return;
         }
 
+        // 앱 화면(Swing)에 한글 입력. 화면 중계는 조합된 글자를 못 보내서 입력 칸의 글자를 대신 친다.
+        if ("GUI_TYPE".equals(type)) {
+            dockerService.typeIntoDesktop(session.getId(), json.path("text").asText(""));
+            return;
+        }
+
         // 실행(RUN) 기본 파라미터 파싱
         String workspaceId = json.get("workspaceId").asText();
         String projectName = json.get("projectName").asText();

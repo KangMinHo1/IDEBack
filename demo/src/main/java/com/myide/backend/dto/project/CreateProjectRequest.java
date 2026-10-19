@@ -10,6 +10,8 @@ import lombok.NoArgsConstructor;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 
+import java.util.List;
+
 @Data
 @Builder
 @NoArgsConstructor
@@ -31,4 +33,7 @@ public class CreateProjectRequest {
 
     private String description;
     private String gitUrl;
+
+    // 스프링부트 템플릿에서 고른 의존성 이름(SpringDependency). 비어 있으면 웹만 들어간다.
+    private List<String> dependencies;
 }

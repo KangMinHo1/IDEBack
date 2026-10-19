@@ -16,6 +16,9 @@ import com.myide.backend.service.FileService;
 import com.myide.backend.service.design.doctor.DesignDoctorService;
 import com.myide.backend.service.design.doctor.Finding;
 import com.myide.backend.service.design.doctor.Severity;
+import com.myide.backend.service.template.SpringAppConfig;
+import com.myide.backend.service.template.SpringBuildScript;
+import com.myide.backend.service.template.SpringDependency;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -26,9 +29,11 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 설계에서 코드를 만들고, 고른 것만 프로젝트에 쓴다.
@@ -100,6 +105,7 @@ public class DesignCodegenService {
 
         CodegenOptions options = optionsFor(request.basePackage(), detected);
         List<GeneratedFile> files = generate(model, options, targets);
+        files.addAll(setupFiles(workspaceId, request.projectName(), request.branchName(), files));
         List<CodegenFileView> views = new ArrayList<>();
 
         for (GeneratedFile file : files) {
@@ -147,7 +153,9 @@ public class DesignCodegenService {
 
         // 클라이언트가 보낸 내용을 쓰지 않고 같은 설계로 다시 만든다.
         Map<String, GeneratedFile> byPath = new LinkedHashMap<>();
-        generate(model, options, targets).forEach(file -> byPath.put(file.path(), file));
+        List<GeneratedFile> generated = generate(model, options, targets);
+        generated.addAll(setupFiles(workspaceId, request.projectName(), request.branchName(), generated));
+        generated.forEach(file -> byPath.put(file.path(), file));
 
         List<CodegenApplyResult> results = new ArrayList<>();
         int written = 0;
@@ -260,6 +268,62 @@ public class DesignCodegenService {
                     files.addAll(generator.generate(model, options));
                 }
             }
+        }
+
+        return files;
+    }
+
+    /**
+     * 만든 코드를 바로 실행할 수 있게 하는 파일. 필요 없으면 빈 목록.
+     *
+     * 엔티티·리포지토리는 JPA 를, 생성된 코드 전반은 Lombok 을 쓰는데 템플릿의 build.gradle 에는
+     * 웹만 들어 있어 넣자마자 컴파일이 깨졌다. JPA 는 붙을 DB 가 있어야 서버가 뜨므로, DB 드라이버가
+     * 하나도 없으면 설치가 필요 없는 H2 를 넣는다(이유는 SpringAppConfig).
+     *
+     * 지금 디스크 내용을 읽어 만든다. 미리보기와 적용이 같은 내용을 만들고, 그 사이에 파일이 바뀌면
+     * apply 의 해시 검사가 막아 준다. build.gradle.kts·pom.xml 은 형식이 달라 건드리지 않는다.
+     */
+    private List<GeneratedFile> setupFiles(String workspaceId, String projectName, String branchName,
+                                           List<GeneratedFile> generated) {
+        boolean usesJpa = generated.stream().anyMatch(file ->
+                file.target() == CodegenTarget.SPRING_ENTITY
+                        || file.target() == CodegenTarget.SPRING_REPOSITORY);
+        String script = readExisting(workspaceId, projectName, branchName, "build.gradle");
+
+        if (!usesJpa || script == null) {
+            return List.of();
+        }
+
+        List<String> needed = new ArrayList<>();
+        needed.addAll(SpringDependency.JPA.gradleLines());
+        needed.addAll(SpringDependency.LOMBOK.gradleLines());
+
+        boolean hasMysql = SpringBuildScript.contains(script, SpringDependency.MYSQL.gradleLines().get(0));
+        // DB 드라이버가 하나도 없으면 H2 를 넣으므로, 그때도 H2 를 쓰는 것으로 친다.
+        boolean useH2 = !hasMysql
+                || SpringBuildScript.contains(script, SpringDependency.H2.gradleLines().get(0));
+        if (!hasMysql && !SpringBuildScript.contains(script, SpringDependency.H2.gradleLines().get(0))) {
+            needed.addAll(SpringDependency.H2.gradleLines());
+        }
+
+        List<GeneratedFile> files = new ArrayList<>();
+        String patched = SpringBuildScript.addMissing(script, needed);
+        if (!patched.equals(script)) {
+            long added = needed.stream().filter(line -> !SpringBuildScript.contains(script, line)).count();
+            files.add(GeneratedFile.shared("build.gradle", patched, CodegenTarget.SPRING_SETUP,
+                    "빠진 의존성 " + added + "줄 덧붙임"));
+        }
+
+        boolean hasConfig = List.of("application.yml", "application.yaml", "application.properties")
+                .stream()
+                .anyMatch(name -> readExisting(workspaceId, projectName, branchName,
+                        "src/main/resources/" + name) != null);
+        if (!hasConfig) {
+            Set<SpringDependency> db = EnumSet.of(SpringDependency.JPA,
+                    useH2 ? SpringDependency.H2 : SpringDependency.MYSQL);
+            SpringAppConfig.render(db).ifPresent(content -> files.add(GeneratedFile.shared(
+                    SpringAppConfig.PATH, content, CodegenTarget.SPRING_SETUP,
+                    useH2 ? "H2 메모리 DB 설정" : "MySQL 접속 설정 (직접 채우기)")));
         }
 
         return files;

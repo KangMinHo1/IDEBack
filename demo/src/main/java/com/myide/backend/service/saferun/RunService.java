@@ -259,10 +259,15 @@ public class RunService {
                     // 실제로 실행될 조합에 창 코드가 있는지 본다. 임시 폴더를 지우기 전에 봐야 한다.
                     boolean desktopUi = bench.guiHostPort() > 0 && DesktopUiDetector.usesDesktopUi(runDir);
 
+                    // bootRun 은 시작 클래스의 main 만 돌리므로, 창 클래스의 main 은 따로 띄운다.
+                    String windowClass = desktopUi && isSpringBoot
+                            ? DesktopWindowLauncher.findWindowClass(runDir, request.filePath()).orElse(null)
+                            : null;
+
                     // 컨테이너에 다 들어갔으니 임시 폴더는 프로그램이 도는 동안 붙들고 있을 이유가 없다.
                     deleteAll(tempDirs);
 
-                    runProgram(session, bench, commands, desktopUi && startDesktop(session, bench));
+                    runProgram(session, bench, commands, desktopUi && startDesktop(session, bench), windowClass);
                     finish(session);
                     return;
                 }
@@ -372,12 +377,25 @@ public class RunService {
 
     /** 컴파일이 성공했다. 같은 컨테이너에서 프로그램을 실행하고 끝날 때까지 기다린다. */
     private void runProgram(WebSocketSession session, DockerService.Workbench bench, RunCommands.Commands commands,
-                            boolean desktopUi)
+                            boolean desktopUi, String windowClass)
             throws IOException, InterruptedException {
 
         CountDownLatch ended = new CountDownLatch(1);
 
-        String runShell = desktopUi ? DESKTOP_ENV + commands.runShell() : commands.runShell();
+        String runShell = commands.runShell();
+
+        if (desktopUi) {
+            String launchWindow = "";
+
+            if (windowClass != null) {
+                launchWindow = DesktopWindowLauncher.launchShell(
+                        // 창 클래스는 Spring Boot 일 때만 고른다. 서버는 컨테이너 안에서 이 포트로 뜬다.
+                        windowClass, windowClasspath(session, bench), TemplateType.SPRING_BOOT.getDefaultPort());
+                send(session, "[System] 서버가 뜨면 " + windowClass + " 창을 따로 띄워요\n");
+            }
+
+            runShell = DESKTOP_ENV + launchWindow + runShell;
+        }
 
         dockerService.execStreaming(session, bench.containerId(), runShell, new DockerService.RunOutput() {
             @Override
@@ -399,6 +417,23 @@ public class RunService {
         // 프로그램이 스스로 끝나거나, 사용자가 중지해 컨테이너가 사라질 때까지.
         // Spring Boot 는 여기서 기다리는 동안 대기열의 자리를 쥐고 있다.
         ended.await();
+    }
+
+    /**
+     * 창을 띄울 때 쓸 라이브러리 목록. 서버(bootRun)를 켜기 전에 묻는다 — 같은 프로젝트에 gradle 을
+     * 겹쳐 돌리면 서로 잠금을 기다린다. 못 받으면 프로젝트 클래스만으로 띄운다(라이브러리를 안 쓰는 창은 뜬다).
+     */
+    private String windowClasspath(WebSocketSession session, DockerService.Workbench bench)
+            throws InterruptedException {
+
+        DockerService.ExecResult result = dockerService.execAndWait(
+                bench.containerId(), DesktopWindowLauncher.classpathShell(), buildTimeoutSeconds);
+
+        return DesktopWindowLauncher.parseClasspath(result.output()).orElseGet(() -> {
+            send(session, "[System] 라이브러리 목록을 받지 못해 프로젝트 코드만으로 창을 띄워요. "
+                    + "창에서 라이브러리를 쓰면 실행 중 오류가 날 수 있어요\n");
+            return DesktopWindowLauncher.FALLBACK_CLASSPATH;
+        });
     }
 
     private void announceSuccess(

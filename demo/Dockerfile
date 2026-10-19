@@ -75,6 +75,8 @@ RUN wget https://services.gradle.org/distributions/gradle-8.5-bin.zip -P /tmp \
 #   x11vnc     그 화면을 원격 화면(VNC) 신호로 내보낸다
 #   novnc      VNC 를 브라우저가 볼 수 있는 웹 페이지로 바꾼다 (IDE 의 미리보기 창에 뜬다)
 #   fonts-nanum 한글 글꼴. 없으면 한글이 네모로 나온다
+#   xdotool    글자를 대신 친다. 화면 중계는 누른 키만 보내 한글이 조합되지 않으므로,
+#              앱 화면의 한글 입력 칸에서 받은 글자를 이것으로 창에 넣는다(DesktopTyping)
 RUN apt-get update && apt-get install -y \
     xvfb \
     openbox \
@@ -82,6 +84,7 @@ RUN apt-get update && apt-get install -y \
     novnc \
     websockify \
     fonts-nanum \
+    xdotool \
     && rm -rf /var/lib/apt/lists/*
 
 # 화면을 켜는 스크립트. 서버(RunService)가 창을 쓰는 프로그램을 실행하기 직전에 부른다.
@@ -109,13 +112,26 @@ RUN printf '%s\n' \
 # 안 /root/.gradle 에 남는다. 컨테이너마다 그 사본을 쓰므로, 여러 컨테이너가 캐시 하나를 같이
 # 쓸 때와 달리 누군가의 코드가 캐시를 바꿔도 다른 실행에 번지지 않는다.
 # 템플릿의 스프링부트 버전을 바꾸면 여기도 같이 바꾸고 이미지를 다시 빌드해야 빨라진다.
+# 작업 폴더를 만들 때 고를 수 있는 의존성(SpringDependency)과, 설계 코드 생성이 덧붙이는
+# JPA·Lombok·H2 도 같이 받아 둔다. 그 목록에 항목을 늘리면 여기에도 넣는다.
 #
 # gradle 일꾼(데몬)은 실행마다 새로 켜지는데, 켜질 때 최적화를 덜 하게(TieredStopAtLevel=1)
 # 하면 첫 빌드가 17초에서 12초 정도로 준다. 빌드 도구라 오래 돌지 않아서 손해가 없다.
 RUN mkdir -p /root/.gradle /tmp/warm/src/main/java/com/example/demo \
     && printf '%s\n' 'org.gradle.jvmargs=-Xmx1g -XX:TieredStopAtLevel=1 -XX:+UseParallelGC' \
         > /root/.gradle/gradle.properties \
-    && printf "plugins { id 'org.springframework.boot' version '3.2.0'; id 'io.spring.dependency-management' version '1.1.4'; id 'java' }\nrepositories { mavenCentral() }\ndependencies { implementation 'org.springframework.boot:spring-boot-starter-web' }\n" \
+    && printf '%s\n' \
+        "plugins { id 'org.springframework.boot' version '3.2.0'; id 'io.spring.dependency-management' version '1.1.4'; id 'java' }" \
+        "repositories { mavenCentral() }" \
+        "dependencies {" \
+        "    implementation 'org.springframework.boot:spring-boot-starter-web'" \
+        "    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'" \
+        "    implementation 'org.springframework.boot:spring-boot-starter-validation'" \
+        "    runtimeOnly 'com.h2database:h2'" \
+        "    runtimeOnly 'com.mysql:mysql-connector-j'" \
+        "    compileOnly 'org.projectlombok:lombok'" \
+        "    annotationProcessor 'org.projectlombok:lombok'" \
+        "}" \
         > /tmp/warm/build.gradle \
     && printf '%s\n' 'package com.example.demo;' \
         '@org.springframework.boot.autoconfigure.SpringBootApplication' \

@@ -10,6 +10,7 @@ import com.myide.backend.dto.project.ProjectListResponse;
 import com.myide.backend.repository.ProjectRepository;
 import com.myide.backend.repository.workspace.WorkspaceRepository;
 import com.myide.backend.service.template.ProjectTemplateStrategy;
+import com.myide.backend.service.template.SpringDependency;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -34,6 +35,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -167,6 +169,10 @@ public class ProjectService {
         Path masterRepoPath =
                 projectRoot.resolve(DEFAULT_BRANCH_NAME);
 
+        // 폴더를 만들기 전에 검사한다. 아래 try 안에서 거절하면 "생성 중 오류"로 뭉개져 이유가 안 보인다.
+        Set<SpringDependency> dependencies =
+                SpringDependency.parse(request.getDependencies());
+
         if (Files.exists(projectRoot)) {
             throw new RuntimeException(
                     "이미 존재하는 프로젝트입니다."
@@ -199,7 +205,8 @@ public class ProjectService {
 
             strategy.generateTemplate(
                     masterRepoPath,
-                    request.getLanguage()
+                    request.getLanguage(),
+                    dependencies
             );
 
             gitService.createRepository(masterRepoPath);

@@ -188,6 +188,38 @@ class CodegenWritesFilesTest {
         assertThat(first.files()).isNotEmpty();
     }
 
+    @Test
+    @DisplayName("만든 코드가 바로 돌도록 빠진 의존성과 DB 설정을 같이 넣고, 있는 설정은 건드리지 않는다")
+    void addsRunSetup() throws IOException {
+        CodegenPreviewResponse preview = service.preview(WORKSPACE,
+                new CodegenPreviewRequest(CodegenFixtures.board(), PROJECT, BRANCH, ""));
+
+        service.apply(WORKSPACE, new CodegenApplyRequest(CodegenFixtures.board(), PROJECT, BRANCH, "",
+                preview.files().stream()
+                        .map(file -> new CodegenApplySelection(file.path(), file.existingHash()))
+                        .toList()));
+
+        String script = contentOf(projectDir.resolve("build.gradle"));
+        assertThat(script).startsWith("group = 'com.example.shop'");
+        assertThat(script).contains("spring-boot-starter-data-jpa", "compileOnly 'org.projectlombok:lombok'",
+                "annotationProcessor 'org.projectlombok:lombok'", "runtimeOnly 'com.h2database:h2'");
+        assertThat(contentOf(projectDir.resolve("src/main/resources/application.yml"))).contains("jdbc:h2:mem:");
+
+        // MySQL 을 이미 쓰고 설정도 있으면 H2 를 넣거나 설정을 만들지 않는다.
+        Files.writeString(projectDir.resolve("build.gradle"),
+                "dependencies {\n    runtimeOnly 'com.mysql:mysql-connector-j'\n}\n", StandardCharsets.UTF_8);
+        Files.delete(projectDir.resolve("src/main/resources/application.yml"));
+        Files.writeString(projectDir.resolve("src/main/resources/application.properties"), "x=1",
+                StandardCharsets.UTF_8);
+
+        CodegenPreviewResponse mysql = service.preview(WORKSPACE,
+                new CodegenPreviewRequest(CodegenFixtures.board(), PROJECT, BRANCH, ""));
+
+        assertThat(mysql.files()).noneMatch(file -> file.path().endsWith("application.yml"));
+        assertThat(mysql.files().stream().filter(file -> file.path().equals("build.gradle")).findFirst()
+                .orElseThrow().content()).doesNotContain("h2");
+    }
+
     private String contentOf(Path path) {
         try {
             return Files.readString(path, StandardCharsets.UTF_8);
