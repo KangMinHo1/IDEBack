@@ -183,17 +183,37 @@ public class GitController {
         return token;
     }
 
-    private boolean isGithubAuthError(Exception e) {
-        String errorMsg = e.getMessage() != null
+    /**
+     * GitHub 가 토큰 자체를 받아 주지 않았는가. 이때만 토큰을 지우고 다시 인증하게 한다.
+     *
+     * 예전에는 "Repository not found" 같은 저장소 접근 실패도 여기에 넣었다. 그러면 토큰은 멀쩡한데
+     * 저장소 주소가 틀렸거나 그 계정에 쓰기 권한이 없을 때도 토큰을 지웠고, 다시 인증해도 같은 이유로
+     * 또 지워져 "인증하기" 화면만 계속 뜨고 푸시는 한 번도 되지 않았다.
+     */
+    private boolean isGithubTokenRejected(Exception e) {
+        String errorMsg = lowerMessage(e);
+
+        return errorMsg.contains("invalid username or token")
+                || errorMsg.contains("invalid username or password")
+                || errorMsg.contains("authentication failed")
+                || errorMsg.contains("could not read password");
+    }
+
+    /** 토큰은 받아 줬지만 이 저장소에 접근할 수 없다. 다시 인증해도 해결되지 않는다. */
+    private boolean isRepositoryAccessError(Exception e) {
+        String errorMsg = lowerMessage(e);
+
+        return errorMsg.contains("repository not found")
+                || errorMsg.contains("permission to")
+                || errorMsg.contains("access restrictions")
+                || errorMsg.contains("not authorized")
+                || errorMsg.contains("returned error: 403");
+    }
+
+    private String lowerMessage(Exception e) {
+        return e.getMessage() != null
                 ? e.getMessage().toLowerCase(Locale.ROOT)
                 : "";
-
-        return errorMsg.contains("not authorized")
-                || errorMsg.contains("authentication")
-                || errorMsg.contains("permitted")
-                || errorMsg.contains("could not read username")
-                || errorMsg.contains("invalid username or password")
-                || errorMsg.contains("repository not found");
     }
 
     private ResponseEntity<String> handleGithubCommandFailure(Exception e, User user, String fallbackPrefix) {
@@ -202,11 +222,18 @@ public class GitController {
             return ResponseEntity.status(403).body("GITHUB_TOKEN_REQUIRED");
         }
 
-        if (isGithubAuthError(e)) {
+        if (isGithubTokenRejected(e)) {
             user.clearGithubInfo();
             userRepository.save(user);
 
             return ResponseEntity.status(403).body("GITHUB_TOKEN_EXPIRED");
+        }
+
+        if (isRepositoryAccessError(e)) {
+            return ResponseEntity.badRequest().body(
+                    "GitHub 저장소에 접근할 수 없습니다. 연결한 저장소 주소가 맞는지, "
+                            + "인증한 GitHub 계정(" + user.getGithubUsername() + ")이 이 저장소에 쓰기 권한이 있는지 확인하세요.\n"
+                            + e.getMessage());
         }
 
         return ResponseEntity.badRequest().body(fallbackPrefix + ": " + e.getMessage());
