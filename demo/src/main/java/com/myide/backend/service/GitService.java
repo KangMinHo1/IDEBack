@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -48,7 +49,8 @@ public class GitService {
             return "";
         }
 
-        return value.replaceAll("://.*@", "://***@");
+        return value.replaceAll("://.*@", "://***@")
+                .replaceAll("(?i)(Authorization: Basic )\\S+", "$1***");
     }
 
     private CommandResult runGitCommand(Path directory, String... commands) throws Exception {
@@ -452,24 +454,39 @@ public class GitService {
         }
     }
 
-    private String buildAuthenticatedRemoteUrl(String remoteUrl, String token) {
+    /**
+     * 토큰 없이 원격 주소만 남긴다. 예전에 주소 안에 토큰을 넣어 저장한 경우도 걸러 낸다.
+     */
+    private String plainRemoteUrl(String remoteUrl) {
         if (remoteUrl == null || remoteUrl.isBlank()) {
             throw new RuntimeException("원격 저장소가 연결되어 있지 않습니다.");
         }
 
-        if (token == null || token.trim().isEmpty()) {
-            return remoteUrl;
+        return remoteUrl.replaceFirst("^(https?://)[^/@]+@", "$1");
+    }
+
+    /**
+     * GitHub 토큰을 인증 헤더로 붙인 git 명령.
+     *
+     * 예전에는 토큰을 주소에 넣었다(https://토큰@github.com/...). 그런데 일부 git·curl 버전은
+     * 실제 접속 주소를 토큰이 빠진 주소로 알려 주고, git 은 이것을 "다른 주소로 옮겨졌다"
+     * (warning: redirecting to ...)로 보고 그다음 요청을 토큰 없이 보냈다. 그래서 배포 서버에서
+     * 인증은 통과했는데 푸시가 "could not read Username" 으로 실패했다.
+     * 헤더는 리다이렉트 뒤 요청에도 붙는다. 토큰을 사용자 이름 자리에 두는 형식은 예전과 같다.
+     */
+    private String[] gitWithAuth(String token, String... args) {
+        List<String> command = new ArrayList<>();
+        command.add("git");
+
+        if (token != null && !token.isBlank()) {
+            String basic = Base64.getEncoder()
+                    .encodeToString((token.trim() + ":").getBytes(StandardCharsets.UTF_8));
+            command.add("-c");
+            command.add("http.extraHeader=Authorization: Basic " + basic);
         }
 
-        if (remoteUrl.startsWith("https://")) {
-            return remoteUrl.replace("https://", "https://" + token + "@");
-        }
-
-        if (remoteUrl.startsWith("http://")) {
-            return remoteUrl.replace("http://", "http://" + token + "@");
-        }
-
-        return remoteUrl;
+        command.addAll(Arrays.asList(args));
+        return command.toArray(new String[0]);
     }
 
     public void fetch(Path targetPath, String token) {
@@ -486,9 +503,9 @@ public class GitService {
                 throw new RuntimeException("원격 저장소가 연동되어 있지 않습니다.");
             }
 
-            String fetchUrl = buildAuthenticatedRemoteUrl(remoteUrl, token);
+            String fetchUrl = plainRemoteUrl(remoteUrl);
 
-            executeGitCommand(targetPath, "git", "fetch", "--prune", fetchUrl);
+            executeGitCommand(targetPath, gitWithAuth(token, "fetch", "--prune", fetchUrl));
 
             log.info("📡 Fetch Completed: {}", targetPath);
         } catch (Exception e) {
@@ -511,7 +528,7 @@ public class GitService {
                 throw new RuntimeException("원격 저장소(GitHub URL)가 연결되어 있지 않습니다. 먼저 연동해주세요.");
             }
 
-            String pushUrl = buildAuthenticatedRemoteUrl(remoteUrl, token);
+            String pushUrl = plainRemoteUrl(remoteUrl);
 
             String currentBranch = executeGitCommand(
                     targetPath,
@@ -525,10 +542,7 @@ public class GitService {
 
             executeGitCommand(
                     targetPath,
-                    "git",
-                    "push",
-                    pushUrl,
-                    currentBranch + ":" + currentBranch
+                    gitWithAuth(token, "push", pushUrl, currentBranch + ":" + currentBranch)
             );
 
             log.info("✅ Push Completed Successfully!");
@@ -552,24 +566,17 @@ public class GitService {
                 throw new RuntimeException("원격 저장소(GitHub URL)가 연결되어 있지 않습니다. 먼저 연동해주세요.");
             }
 
-            String pushUrl = buildAuthenticatedRemoteUrl(remoteUrl, token);
+            String pushUrl = plainRemoteUrl(remoteUrl);
 
             if (setUpstream) {
                 executeGitCommand(
                         targetPath,
-                        "git",
-                        "push",
-                        "-u",
-                        pushUrl,
-                        branchName + ":" + branchName
+                        gitWithAuth(token, "push", "-u", pushUrl, branchName + ":" + branchName)
                 );
             } else {
                 executeGitCommand(
                         targetPath,
-                        "git",
-                        "push",
-                        pushUrl,
-                        branchName + ":" + branchName
+                        gitWithAuth(token, "push", pushUrl, branchName + ":" + branchName)
                 );
             }
 
@@ -594,7 +601,7 @@ public class GitService {
                 throw new RuntimeException("원격 저장소가 연동되어 있지 않습니다.");
             }
 
-            String pullUrl = buildAuthenticatedRemoteUrl(remoteUrl, token);
+            String pullUrl = plainRemoteUrl(remoteUrl);
 
             String currentBranch = executeGitCommand(
                     targetPath,
@@ -608,15 +615,17 @@ public class GitService {
 
             executeGitCommand(
                     targetPath,
-                    "git",
-                    "-c",
-                    "user.name=" + authorName,
-                    "-c",
-                    "user.email=" + authorEmail,
-                    "pull",
-                    pullUrl,
-                    currentBranch,
-                    "--allow-unrelated-histories"
+                    gitWithAuth(
+                            token,
+                            "-c",
+                            "user.name=" + authorName,
+                            "-c",
+                            "user.email=" + authorEmail,
+                            "pull",
+                            pullUrl,
+                            currentBranch,
+                            "--allow-unrelated-histories"
+                    )
             );
 
             log.info("✅ Pull Completed Successfully!");

@@ -196,7 +196,10 @@ public class GitController {
         return errorMsg.contains("invalid username or token")
                 || errorMsg.contains("invalid username or password")
                 || errorMsg.contains("authentication failed")
-                || errorMsg.contains("could not read password");
+                || errorMsg.contains("could not read password")
+                // 토큰은 인증 헤더로 매 요청에 붙는다(GitService.gitWithAuth). 그래도 사용자 이름을
+                // 물으려 했다면 GitHub 가 그 토큰을 거부한 것이다.
+                || errorMsg.contains("could not read username");
     }
 
     /** 토큰은 받아 줬지만 이 저장소에 접근할 수 없다. 다시 인증해도 해결되지 않는다. */
