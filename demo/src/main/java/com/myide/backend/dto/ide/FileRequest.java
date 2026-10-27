@@ -70,4 +70,10 @@ public class FileRequest {
 
     @Pattern(regexp = "^[^\\\\/:*?\"<>|]+$", message = "파일명에 사용할 수 없는 특수문자가 있습니다.")
     private String newName;
+
+    /*
+     * 파일 이동(탐색기 드래그) 대상 폴더. 브랜치 폴더 기준 상대경로이고 "" 이면 최상위다.
+     * 값이 있으면 이름은 그대로 두고 이 폴더로 옮긴다(newName 은 무시).
+     */
+    private String targetFolder;
 }

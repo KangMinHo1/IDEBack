@@ -141,7 +141,7 @@ public class IdeController {
             @RequestBody @Valid FileRequest request,
             @AuthenticationPrincipal Long userId
     ) {
-        fileService.renameFile(request);
+        String renamedPath = fileService.renameFile(request);
 
         // 파일명 변경 후 같은 workspace/project/branch 방에 접속 중인 사용자들에게 알림
         workspaceEventWebSocketHandler.broadcastFileTreeChanged(request, "RENAME");
@@ -151,12 +151,12 @@ public class IdeController {
 
         // 이름 변경은 "옛 경로 삭제 + 새 경로 생성"으로 적는다.
         BranchKey key = branchKeyOf(request);
+        // 이동(드래그)도 같은 길로 온다. 새 경로는 서비스가 실제로 옮긴 곳을 쓴다.
         String oldPath = EditLedger.normalizePath(request.getFilePath());
-        String parent = oldPath.contains("/") ? oldPath.substring(0, oldPath.lastIndexOf('/') + 1) : "";
 
         authorStatusService.recordEdit(key, oldPath, userId);
         authorStatusService.onFileRemoved(key, oldPath);
-        authorStatusService.recordEdit(key, parent + request.getNewName(), userId);
+        authorStatusService.recordEdit(key, renamedPath, userId);
 
         // 옛 이름의 파일을 샌드박스에서 고치던 사람에게 알린다(팀 쪽에서는 그 파일이 사라졌다).
         sandboxService.notifyTeamFileChanged(key, oldPath);

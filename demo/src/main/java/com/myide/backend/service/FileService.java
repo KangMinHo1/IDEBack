@@ -274,7 +274,8 @@ public class FileService {
         }
     }
 
-    public void renameFile(FileRequest request) {
+    /** @return 옮긴 뒤의 경로(브랜치 폴더 기준 상대경로). */
+    public String renameFile(FileRequest request) {
         String branchName = normalizeBranchName(request.getBranchName());
 
         Path root = workspaceService
@@ -295,14 +296,52 @@ public class FileService {
             throw new IllegalArgumentException("변경할 수 없는 경로입니다.");
         }
 
-        Path newPath = oldPath.getParent().resolve(request.getNewName()).normalize();
+        boolean isMove = request.getTargetFolder() != null;
+        Path newPath;
+
+        if (isMove) {
+            Path folder = root.resolve(normalizeFilePath(request.getTargetFolder())).normalize();
+
+            if (!folder.startsWith(root)) {
+                throw new SecurityException("잘못된 파일 접근입니다.");
+            }
+
+            if (!Files.isDirectory(folder)) {
+                throw notFoundFileRequest("옮길 폴더가 없습니다: " + request.getTargetFolder());
+            }
+
+            newPath = folder.resolve(oldPath.getFileName()).normalize();
+
+            if (newPath.startsWith(oldPath)) {
+                throw badFileRequest("폴더를 자기 안으로 옮길 수 없습니다.");
+            }
+
+            // 이름 변경과 달리 덮어쓰지 않는다. 드래그 한 번에 다른 파일이 사라지면 안 된다.
+            if (Files.exists(newPath)) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "옮길 폴더에 같은 이름이 이미 있습니다.");
+            }
+        } else {
+            if (request.getNewName() == null) {
+                throw badFileRequest("새 이름이 비어 있습니다.");
+            }
+
+            newPath = oldPath.getParent().resolve(request.getNewName()).normalize();
+        }
 
         if (!newPath.startsWith(root)) {
             throw new SecurityException("잘못된 파일 접근입니다.");
         }
 
+        if (!Files.exists(oldPath)) {
+            throw notFoundFileRequest("파일을 찾을 수 없습니다: " + normalizeFilePath(request.getFilePath()));
+        }
+
         try {
-            Files.move(oldPath, newPath, StandardCopyOption.REPLACE_EXISTING);
+            if (isMove) {
+                Files.move(oldPath, newPath);
+            } else {
+                Files.move(oldPath, newPath, StandardCopyOption.REPLACE_EXISTING);
+            }
 
             codeMapService.invalidateCache(
                     request.getWorkspaceId(),
@@ -313,6 +352,8 @@ public class FileService {
         } catch (IOException e) {
             throw new RuntimeException("이름 변경 실패", e);
         }
+
+        return root.relativize(newPath).toString().replace("\\", "/");
     }
 
     private FileNode traverseDirectory(Path dir, Path rootDir, String rootName) {

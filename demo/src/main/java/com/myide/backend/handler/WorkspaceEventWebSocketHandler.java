@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
+import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorator;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import java.net.URI;
@@ -32,7 +33,11 @@ public class WorkspaceEventWebSocketHandler extends TextWebSocketHandler {
     public void afterConnectionEstablished(WebSocketSession session) {
         String room = getRoomName(session);
 
-        rooms.computeIfAbsent(room, k -> new CopyOnWriteArraySet<>()).add(session);
+        // 한 세션에 두 스레드가 동시에 보내면 Tomcat 이 IllegalStateException 을 던진다.
+        // 파일 생성 알림과 작성자 상태 알림이 겹치면 생성 알림이 사라져 팀원 탐색기에 파일이 안 떴다.
+        // 데코레이터가 동시 전송을 줄 세운다(보내기 10초·버퍼 512KB 를 넘기면 그 세션만 끊는다).
+        rooms.computeIfAbsent(room, k -> new CopyOnWriteArraySet<>())
+                .add(new ConcurrentWebSocketSessionDecorator(session, 10_000, 512 * 1024));
 
         log.info("📁 [WorkspaceEvent] 접속: sessionId={}, room={}", session.getId(), room);
     }
@@ -43,7 +48,8 @@ public class WorkspaceEventWebSocketHandler extends TextWebSocketHandler {
         Set<WebSocketSession> sessions = rooms.get(room);
 
         if (sessions != null) {
-            sessions.remove(session);
+            // 방에는 데코레이터가 들어 있어 원본 세션으로는 지워지지 않는다. id 로 찾는다.
+            sessions.removeIf(s -> s.getId().equals(session.getId()));
 
             if (sessions.isEmpty()) {
                 rooms.remove(room);
@@ -149,20 +155,31 @@ public class WorkspaceEventWebSocketHandler extends TextWebSocketHandler {
             return;
         }
 
+        String json;
         try {
-            String json = objectMapper.writeValueAsString(payload);
-            TextMessage textMessage = new TextMessage(json);
+            json = objectMapper.writeValueAsString(payload);
+        } catch (Exception e) {
+            log.error("❌ [WorkspaceEvent] 메시지 직렬화 실패: room={}", room, e);
+            return;
+        }
 
-            for (WebSocketSession session : sessions) {
-                if (session.isOpen()) {
-                    session.sendMessage(textMessage);
-                }
+        TextMessage textMessage = new TextMessage(json);
+
+        // 실패는 세션마다 따로 잡는다. 반복문 전체를 감싸면 한 명이 실패할 때
+        // 그 뒤의 팀원 모두가 알림을 못 받는다.
+        for (WebSocketSession session : sessions) {
+            if (!session.isOpen()) {
+                continue;
             }
 
-            log.info("📢 [WorkspaceEvent] broadcast 완료: room={}, payload={}", room, json);
-        } catch (Exception e) {
-            log.error("❌ [WorkspaceEvent] broadcast 실패: room={}", room, e);
+            try {
+                session.sendMessage(textMessage);
+            } catch (Exception e) {
+                log.error("❌ [WorkspaceEvent] 전송 실패: room={}, sessionId={}", room, session.getId(), e);
+            }
         }
+
+        log.info("📢 [WorkspaceEvent] broadcast 완료: room={}, payload={}", room, json);
     }
 
     private String getRoomName(WebSocketSession session) {
