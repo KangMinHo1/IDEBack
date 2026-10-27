@@ -4,6 +4,8 @@ import com.myide.backend.dto.codemap.CreateComponentRequest;
 import com.myide.backend.dto.codemap.CreateRelationRequest;
 import com.myide.backend.dto.codemap.CodeMapResponse;
 import com.myide.backend.dto.codemap.CodeGenerateRequest;
+import com.myide.backend.dto.ide.FileRequest;
+import com.myide.backend.handler.WorkspaceEventWebSocketHandler;
 import com.myide.backend.service.CodeMapService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -16,6 +18,7 @@ import org.springframework.web.bind.annotation.*;
 public class CodeMapController {
 
     private final CodeMapService codeMapService;
+    private final WorkspaceEventWebSocketHandler workspaceEventWebSocketHandler;
 
     @GetMapping("/analyze")
     public ResponseEntity<CodeMapResponse> analyzeCodeMap(
@@ -41,6 +44,14 @@ public class CodeMapController {
     public ResponseEntity<String> createComponent(@RequestBody @Valid CreateComponentRequest request) {
         try {
             codeMapService.createComponent(request);
+            // 탐색기 파일 생성과 같은 알림을 보낸다. 없으면 팀원 탐색기가 새 파일을 모른다.
+            workspaceEventWebSocketHandler.broadcastFileTreeChanged(FileRequest.builder()
+                    .workspaceId(request.getWorkspaceId())
+                    .projectName(request.getProjectName())
+                    .branchName(request.getBranchName())
+                    .filePath(request.getName())
+                    .type("file")
+                    .build(), "CREATE");
             return ResponseEntity.ok("컴포넌트가 성공적으로 생성되었습니다.");
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(e.getMessage());
