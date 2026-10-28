@@ -107,11 +107,41 @@ public class DesignDocSnapshot {
         this.revision = this.revision + 1;
     }
 
+    /**
+     * 프로젝트 복제용 사본.
+     *
+     * Yjs 바이너리와 평문 사본은 한 글자도 바꾸지 않고 옮긴다. 서버는 Yjs 를 해석하지
+     * 않으므로 항목 id 를 고칠 방법도 없고, 고치면 평문 사본과 어긋난다. 복제본은
+     * 방 이름(design:{workspaceId})이 달라 원본과 같은 문서로 섞이지 않는다.
+     * revision 은 새 문서이므로 1 부터 다시 센다.
+     */
+    public DesignDocSnapshot duplicateTo(Workspace targetWorkspace) {
+        DesignDocSnapshot copy = new DesignDocSnapshot(
+                targetWorkspace,
+                this.schemaVersion,
+                this.yjsUpdateBase64,
+                this.projectionJson,
+                this.updatedBy
+        );
+
+        copy.createdAt = this.createdAt;
+        copy.updatedAt = this.updatedAt;
+
+        return copy;
+    }
+
     @PrePersist
     void onCreate() {
         LocalDateTime now = LocalDateTime.now();
-        this.createdAt = now;
-        this.updatedAt = now;
+
+        // 복제본은 원본 시각을 들고 오므로 비어 있을 때만 채운다.
+        if (this.createdAt == null) {
+            this.createdAt = now;
+        }
+
+        if (this.updatedAt == null) {
+            this.updatedAt = now;
+        }
     }
 
     @PreUpdate

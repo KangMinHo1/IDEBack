@@ -28,11 +28,14 @@ import com.myide.backend.repository.design.DesignDocSnapshotRepository;
 import com.myide.backend.repository.design.DesignDocumentRepository;
 import com.myide.backend.repository.design.DesignRequirementRepository;
 
+import com.myide.backend.repository.rearrange.VirtualFileTreeRepository;
 import com.myide.backend.repository.workspace.WorkspaceMemberRepository;
 import com.myide.backend.repository.workspace.WorkspaceRepository;
 
 import com.myide.backend.service.saferun.RunAssembler;
 import com.myide.backend.service.saferun.SafeRunPaths;
+import com.myide.backend.service.workspace.GitWorktreeRelinker;
+import com.myide.backend.service.workspace.WorkspaceDataCloner;
 
 import lombok.RequiredArgsConstructor;
 
@@ -52,6 +55,7 @@ import java.net.URLDecoder;
 import java.net.URLEncoder;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -120,6 +124,14 @@ public class WorkspaceService {
     private final DesignApiSpecRepository designApiSpecRepository;
 
     private final DesignRequirementRepository designRequirementRepository;
+
+
+    /*
+     * 프로젝트 복제 때 팀원·일정·개발일지·설계 등 작업 데이터를 옮긴다.
+     */
+    private final WorkspaceDataCloner workspaceDataCloner;
+
+    private final VirtualFileTreeRepository virtualFileTreeRepository;
 
 
     /*
@@ -583,9 +595,17 @@ public class WorkspaceService {
      * =====================================================
      * Workspace 복제
      *
-     * 실제 폴더 + Workspace + Project 복제
+     * 실제 폴더 + Workspace + Project
+     * + 팀원(ACCEPTED) · 일정 · 개발일지 · 설계 · 가상 파일 트리
      *
-     * TEAM인 경우 기존 MEMBER는 복제하지 않음
+     * DB 쪽 작업 데이터는 WorkspaceDataCloner 가, 복사한 폴더의
+     * git worktree 연결은 GitWorktreeRelinker 가 사본 쪽으로 다시 잇는다.
+     *
+     * 실패 처리
+     *  - DB: 같은 트랜잭션이라 통째로 롤백된다.
+     *  - 폴더: 트랜잭션이 커밋되지 않고 끝나면(메서드 안 예외든 커밋 실패든)
+     *          afterCompletion 에서 사본 폴더를 지운다. 사본 폴더는 이 메서드가
+     *          직접 새로 만든 경우에만 지운다(원본·남의 폴더는 건드리지 않는다).
      * =====================================================
      */
 
@@ -675,6 +695,42 @@ public class WorkspaceService {
         }
 
 
+        /*
+         * 사본 폴더를 "새로 만들기"로 먼저 잡는다.
+         *
+         * 위 exists 검사와 복사 사이에 같은 이름으로 동시에 복제하면, 두 요청이 한
+         * 폴더에 섞여 복사되고 실패한 쪽이 다른 쪽 폴더까지 지울 수 있다.
+         * createDirectory 는 이미 있으면 실패하므로, 성공한 요청만 이 폴더의 주인이 된다.
+         */
+        try {
+
+            Files.createDirectory(
+                    duplicateRoot
+            );
+
+        } catch (FileAlreadyExistsException e) {
+
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "같은 이름의 프로젝트 폴더가 이미 존재합니다."
+            );
+
+        } catch (IOException e) {
+
+            throw new RuntimeException(
+                    "복제 폴더를 만들지 못했습니다.",
+                    e
+            );
+        }
+
+
+        boolean cleanupRegistered =
+                registerDuplicateCleanup(
+                        originalRoot,
+                        duplicateRoot
+                );
+
+
         try {
 
             /*
@@ -683,6 +739,25 @@ public class WorkspaceService {
             copyDirectory(
                     originalRoot,
                     duplicateRoot
+            );
+
+
+            /*
+             * 복사한 브랜치 폴더(worktree)가 원본 저장소를 가리키지 않도록
+             * git 연결을 사본 쪽으로 다시 잇는다.
+             */
+            GitWorktreeRelinker.Result relinked =
+                    GitWorktreeRelinker.relink(
+                            originalRoot,
+                            duplicateRoot
+                    );
+
+            System.out.println(
+                    "[Workspace 복제] git worktree 연결 재설정: "
+                            + relinked.rewritten()
+                            + "건 (원본 밖 연결 "
+                            + relinked.external()
+                            + "건)"
             );
 
 
@@ -722,27 +797,6 @@ public class WorkspaceService {
                     workspaceRepository.save(
                             duplicatedWorkspace
                     );
-
-
-            /*
-             * TEAM이라면 새로운 OWNER Membership 생성
-             */
-            if (
-                    original.getType()
-                            == WorkspaceType.TEAM
-            ) {
-
-                WorkspaceMember ownerMember =
-                        WorkspaceMember.createOwner(
-                                savedWorkspace,
-                                owner
-                        );
-
-
-                workspaceMemberRepository.save(
-                        ownerMember
-                );
-            }
 
 
             /*
@@ -804,31 +858,40 @@ public class WorkspaceService {
             }
 
 
+            /*
+             * 팀원 · 일정 · 개발일지 · 설계 · 가상 파일 트리
+             * (TEAM 의 OWNER 멤버 행도 여기서 만든다)
+             */
+            workspaceDataCloner.cloneAll(
+                    original,
+                    savedWorkspace
+            );
+
+
             savedWorkspace.setUpdatedAt(
                     LocalDateTime.now()
             );
 
 
+            /*
+             * 제약 위반이 커밋 시점이 아니라 여기서 드러나게 한다.
+             * (커밋에서 터져도 afterCompletion 이 폴더를 치우지만, 원인이
+             *  이 메서드의 예외로 나오는 편이 응답 메시지가 정확하다.)
+             */
+            workspaceRepository.flush();
+
+
         } catch (Exception e) {
 
-            try {
+            /*
+             * 트랜잭션 동기화가 없으면(afterCompletion 이 안 불리면) 여기서 바로 치운다.
+             * 있으면 롤백이 끝난 뒤 afterCompletion 이 치운다.
+             */
+            if (!cleanupRegistered) {
 
-                if (
-                        Files.exists(
-                                duplicateRoot
-                        )
-                ) {
-
-                    FileSystemUtils.deleteRecursively(
-                            duplicateRoot
-                    );
-                }
-
-            } catch (IOException ioException) {
-
-                System.err.println(
-                        "복제 디렉토리 롤백 실패: "
-                                + ioException.getMessage()
+                deleteFailedDuplicate(
+                        originalRoot,
+                        duplicateRoot
                 );
             }
 
@@ -847,6 +910,99 @@ public class WorkspaceService {
                     e
             );
         }
+    }
+
+
+    /*
+     * 복제 트랜잭션이 커밋되지 않고 끝나면 사본 폴더를 지운다.
+     *
+     * 메서드 안의 예외뿐 아니라 커밋 자체가 실패한 경우(flush 이후의 제약 위반,
+     * DB 연결 끊김 등)도 잡으려면 catch 가 아니라 트랜잭션 완료 시점에 봐야 한다.
+     *
+     * @return 등록했으면 true. 트랜잭션 동기화가 없는 호출이면 false(호출자가 직접 치운다).
+     */
+    private boolean registerDuplicateCleanup(
+            Path originalRoot,
+            Path duplicateRoot
+    ) {
+
+        if (
+                !TransactionSynchronizationManager
+                        .isSynchronizationActive()
+        ) {
+            return false;
+        }
+
+
+        TransactionSynchronizationManager
+                .registerSynchronization(
+
+                        new TransactionSynchronization() {
+
+                            @Override
+                            public void afterCompletion(int status) {
+
+                                if (status == STATUS_COMMITTED) {
+                                    return;
+                                }
+
+                                System.out.println(
+                                        "[Workspace 복제] DB 커밋 실패/롤백 - 복제 폴더 정리: "
+                                                + duplicateRoot
+                                );
+
+                                deleteFailedDuplicate(
+                                        originalRoot,
+                                        duplicateRoot
+                                );
+                            }
+                        }
+                );
+
+        return true;
+    }
+
+
+    /*
+     * 실패한 복제본 폴더 삭제.
+     *
+     * 원본과 같은 경로이거나 서로 포함 관계면 절대 지우지 않는다. 복제본 경로는
+     * 이름 검사를 거친 "원본의 형제 폴더"라 그럴 일이 없어야 하지만, 지우는 쪽이
+     * 원본을 날릴 수 있는 유일한 지점이라 한 번 더 막는다.
+     */
+    private void deleteFailedDuplicate(
+            Path originalRoot,
+            Path duplicateRoot
+    ) {
+
+        Path original =
+                originalRoot
+                        .toAbsolutePath()
+                        .normalize();
+
+        Path duplicate =
+                duplicateRoot
+                        .toAbsolutePath()
+                        .normalize();
+
+
+        if (
+                original.startsWith(duplicate) ||
+                        duplicate.startsWith(original)
+        ) {
+
+            System.err.println(
+                    "[Workspace 복제] 원본과 겹치는 경로라 정리를 건너뜁니다: "
+                            + duplicate
+            );
+
+            return;
+        }
+
+
+        deleteWorkspaceDirectorySafely(
+                duplicate
+        );
     }
 
 
@@ -954,6 +1110,20 @@ public class WorkspaceService {
                 .deleteAllByWorkspaceUuid(
                         workspaceId
                 );
+
+
+        /*
+         * 가상 파일 트리(보기용 뷰)
+         *
+         * FK 없이 workspaceId 문자열만 들고 있어 지우지 않으면 주인 없는 행으로 남는다.
+         * 복제가 이 행들을 함께 옮기므로, 복제본을 지울 때도 같이 치운다.
+         */
+        virtualFileTreeRepository.deleteAll(
+                virtualFileTreeRepository
+                        .findByWorkspaceIdOrderByIdAsc(
+                                workspaceId
+                        )
+        );
 
 
         /*

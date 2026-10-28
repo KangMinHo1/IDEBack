@@ -90,6 +90,23 @@ public class DesignDocument {
         this.flowEdgesJson = normalizeJsonArray(flowEdgesJson);
     }
 
+    /** 프로젝트 복제용 사본. 공개 uuid 는 새로 받는다. */
+    public DesignDocument duplicateTo(Workspace targetWorkspace) {
+        DesignDocument copy = new DesignDocument();
+
+        copy.uuid = UUID.randomUUID().toString();
+        copy.workspace = targetWorkspace;
+        copy.createdBy = this.createdBy;
+        copy.erdNodesJson = this.erdNodesJson;
+        copy.erdEdgesJson = this.erdEdgesJson;
+        copy.flowNodesJson = this.flowNodesJson;
+        copy.flowEdgesJson = this.flowEdgesJson;
+        copy.createdAt = this.createdAt;
+        copy.updatedAt = this.updatedAt;
+
+        return copy;
+    }
+
     private static String normalizeJsonArray(String value) {
         return value == null || value.isBlank() ? "[]" : value;
     }
@@ -98,8 +115,14 @@ public class DesignDocument {
     public void prePersist() {
         LocalDateTime now = LocalDateTime.now();
 
-        this.createdAt = now;
-        this.updatedAt = now;
+        // 복제본(duplicateTo)은 원본 시각을 들고 오므로 비어 있을 때만 채운다.
+        if (this.createdAt == null) {
+            this.createdAt = now;
+        }
+
+        if (this.updatedAt == null) {
+            this.updatedAt = now;
+        }
 
         if (this.uuid == null) {
             this.uuid = UUID.randomUUID().toString();
