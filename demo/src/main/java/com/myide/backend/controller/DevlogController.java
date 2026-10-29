@@ -18,12 +18,14 @@ public class DevlogController {
 
     private final DevlogService devlogService;
 
+    // author: 선택. 없음/all = 전체, me = 내가 쓴 일지, 숫자 = 그 회원이 쓴 일지
     @GetMapping("/workspaces/{workspaceId}/devlogs")
     public List<DevlogResponse> getDevlogs(
             @PathVariable String workspaceId,
-            @AuthenticationPrincipal Long userId
+            @AuthenticationPrincipal Long userId,
+            @RequestParam(required = false) String author
     ) {
-        return devlogService.getDevlogs(workspaceId, userId);
+        return devlogService.getDevlogs(workspaceId, userId, author);
     }
 
     @PostMapping("/workspaces/{workspaceId}/devlogs")

@@ -4,6 +4,7 @@ import com.myide.backend.domain.devlog.Devlog;
 import com.myide.backend.dto.mypage.DateCountRow;
 
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -49,10 +50,25 @@ public interface DevlogRepository
             String workspaceUuid
     );
 
+    /*
+     * 목록 조회용.
+     *
+     * 응답이 일지마다 일정·작성자를 읽으므로 함께 가져온다
+     * (빠지면 일지 수만큼 일정·사용자 조회가 따로 나간다).
+     */
+    @EntityGraph(attributePaths = {"schedule", "createdBy"})
     List<Devlog> findByWorkspace_UuidOrderByWorkedDateDescCreatedAtDesc(
             String workspaceUuid
     );
 
+    // 작성자 필터용. 위 목록 조회와 같다.
+    @EntityGraph(attributePaths = {"schedule", "createdBy"})
+    List<Devlog> findByWorkspace_UuidAndCreatedBy_IdOrderByWorkedDateDescCreatedAtDesc(
+            String workspaceUuid,
+            Long createdById
+    );
+
+    @EntityGraph(attributePaths = {"schedule", "createdBy"})
     List<Devlog> findBySchedule_UuidOrderByWorkedDateDescCreatedAtDesc(
             String scheduleUuid
     );

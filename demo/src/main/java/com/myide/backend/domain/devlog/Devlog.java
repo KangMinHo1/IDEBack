@@ -5,6 +5,7 @@ import com.myide.backend.domain.schedule.Schedule;
 import com.myide.backend.domain.workspace.Workspace;
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.BatchSize;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -35,8 +36,10 @@ public class Devlog {
     @JoinColumn(name = "schedule_id")
     private Schedule schedule;
 
+    // 실제로 일지를 쓴 사람. 일정 담당자(Schedule.assignee)와는 다른 개념이다.
+    // 수정해도 바뀌지 않는다(updatable = false 는 DDL 을 바꾸지 않는다).
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "created_by", nullable = false)
+    @JoinColumn(name = "created_by", nullable = false, updatable = false)
     private User createdBy;
 
     @Column(nullable = false, length = 120)
@@ -51,7 +54,9 @@ public class Devlog {
     @Column(nullable = false, length = 50)
     private String category;
 
+    // 목록 응답이 일지마다 태그를 읽으므로, 한 건씩 따로 가져오지 않게 묶어서 읽는다.
     @ElementCollection
+    @BatchSize(size = 100)
     @CollectionTable(
             name = "devlog_tags",
             joinColumns = @JoinColumn(name = "devlog_id")
@@ -111,6 +116,19 @@ public class Devlog {
         copy.updatedAt = this.updatedAt;
 
         return copy;
+    }
+
+    /**
+     * 작성자 본인인지.
+     *
+     * 작성자를 알 수 없는 일지는 누구의 것도 아니다(false) — 작성자가 비어 있다는
+     * 이유로 수정·삭제 검사가 풀리면 안 된다.
+     * 지연 로딩 프록시라도 getId() 는 추가 조회 없이 외래키 값만 읽는다.
+     */
+    public boolean isWrittenBy(Long userId) {
+        return userId != null
+                && createdBy != null
+                && userId.equals(createdBy.getId());
     }
 
     public void update(

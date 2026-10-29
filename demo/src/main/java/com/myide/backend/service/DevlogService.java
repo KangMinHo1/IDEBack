@@ -37,12 +37,24 @@ public class DevlogService {
 
     private final WorkspaceMemberRepository workspaceMemberRepository;
 
-    public List<DevlogResponse> getDevlogs(String workspaceId, Long userId) {
+    /**
+     * 워크스페이스의 개발일지 목록.
+     *
+     * author 는 선택 필터다 — 비어 있거나 "all" 이면 전체, "me" 면 요청한 본인,
+     * 숫자면 그 회원번호가 쓴 일지만. 필터를 줘도 워크스페이스 접근 검사는 똑같이 한다.
+     */
+    public List<DevlogResponse> getDevlogs(String workspaceId, Long userId, String author) {
         validateUserId(userId);
         Workspace workspace = getAccessibleWorkspace(workspaceId, userId);
 
-        return devlogRepository
-                .findByWorkspace_UuidOrderByWorkedDateDescCreatedAtDesc(workspace.getUuid())
+        Long authorId = resolveAuthorFilter(author, userId);
+
+        List<Devlog> devlogs = authorId == null
+                ? devlogRepository.findByWorkspace_UuidOrderByWorkedDateDescCreatedAtDesc(workspace.getUuid())
+                : devlogRepository.findByWorkspace_UuidAndCreatedBy_IdOrderByWorkedDateDescCreatedAtDesc(
+                        workspace.getUuid(), authorId);
+
+        return devlogs
                 .stream()
                 .map(DevlogResponse::from)
                 .toList();
@@ -108,6 +120,7 @@ public class DevlogService {
         validateUserId(userId);
 
         Devlog devlog = getAccessibleDevlog(devlogId, userId);
+        requireAuthor(devlog, userId, "수정");
         Workspace workspace = devlog.getWorkspace();
 
         Schedule schedule = resolveSchedule(workspace.getUuid(), request.scheduleId());
@@ -129,7 +142,44 @@ public class DevlogService {
         validateUserId(userId);
 
         Devlog devlog = getAccessibleDevlog(devlogId, userId);
+        requireAuthor(devlog, userId, "삭제");
         devlogRepository.delete(devlog);
+    }
+
+    /**
+     * 수정·삭제는 작성자 본인만 할 수 있다.
+     *
+     * 팀원은 서로의 일지를 볼 수는 있지만 고치거나 지울 수는 없다.
+     * 방장(OWNER)도 예외가 아니다. 작성자를 알 수 없는 일지도 거부한다.
+     * 워크스페이스 접근 검사(getAccessibleDevlog)를 통과한 뒤에 부른다 —
+     * 팀을 나간 작성자는 자기 일지라도 고칠 수 없다.
+     */
+    private void requireAuthor(Devlog devlog, Long userId, String action) {
+        if (!devlog.isWrittenBy(userId)) {
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "본인이 작성한 개발일지만 " + action + "할 수 있습니다."
+            );
+        }
+    }
+
+    private Long resolveAuthorFilter(String author, Long userId) {
+        if (author == null || author.isBlank() || author.equalsIgnoreCase("all")) {
+            return null;
+        }
+
+        if (author.equalsIgnoreCase("me")) {
+            return userId;
+        }
+
+        try {
+            return Long.valueOf(author.trim());
+        } catch (NumberFormatException e) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "작성자 필터는 all, me 또는 회원 번호여야 합니다."
+            );
+        }
     }
 
     private Schedule resolveSchedule(String workspaceId, String scheduleId) {
