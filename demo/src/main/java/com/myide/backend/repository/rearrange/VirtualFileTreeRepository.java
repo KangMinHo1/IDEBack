@@ -22,6 +22,9 @@ public interface VirtualFileTreeRepository extends JpaRepository<VirtualFileTree
     Optional<VirtualFileTree> findByWorkspaceIdAndBranchNameAndIsActiveTrue(String workspaceId, String branchName);
 
     // 💡 [수정] '특정 브랜치'의 모든 뷰만 콕 집어서 비활성화
+    // 프로젝트 복제 때 워크스페이스의 모든 브랜치 뷰를 옮기기 위해 쓴다.
+    List<VirtualFileTree> findByWorkspaceIdOrderByIdAsc(String workspaceId);
+
     @Modifying
     @Query("UPDATE VirtualFileTree v SET v.isActive = false WHERE v.workspaceId = :workspaceId AND v.branchName = :branchName")
     void deactivateAllByWorkspaceIdAndBranchName(@Param("workspaceId") String workspaceId, @Param("branchName") String branchName);

@@ -48,6 +48,14 @@ app:
   cors:
     allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:https://waivss.vercel.app,https://*.vercel.app,http://localhost:*,http://127.0.0.1:*,http://192.168.*.*:*,http://10.*.*.*:*,http://172.16.*.*:*,http://172.17.*.*:*,http://172.18.*.*:*,http://172.19.*.*:*,http://172.20.*.*:*,http://172.21.*.*:*,http://172.22.*.*:*,http://172.23.*.*:*,http://172.24.*.*:*,http://172.25.*.*:*,http://172.26.*.*:*,http://172.27.*.*:*,http://172.28.*.*:*,http://172.29.*.*:*,http://172.30.*.*:*,http://172.31.*.*:*}
 
+google:
+  gemini:
+    # 최종 보고서에만 쓰는 모델. 공통 google.gemini.url(application-secret.yml)의 모델 이름만 바꿔 끼우므로
+    # 설계 초안·코드 도우미 등 다른 AI 기능의 모델은 그대로다.
+    # 되돌리기: GEMINI_REPORT_MODEL 을 빈 값으로 두면 공통 모델(gemini-2.5-flash)로 돌아간다.
+    report:
+      model: ${GEMINI_REPORT_MODEL:gemini-3.5-flash-lite}
+
 jwt:
   secret: ${JWT_SECRET:aW52YWxpZC1zZWNyZXQta2V5LXRlc3QtdmFsdWUtZm9yLWNhcHN0b25lLXByb2plY3Q=}
   access-token-expiration-ms: 900000

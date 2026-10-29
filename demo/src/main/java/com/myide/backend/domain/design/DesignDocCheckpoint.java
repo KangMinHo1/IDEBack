@@ -78,8 +78,31 @@ public class DesignDocCheckpoint {
         this.createdBy = createdBy;
     }
 
+    /**
+     * 프로젝트 복제용 사본.
+     *
+     * 목록과 "가장 최근 기록" 판정이 createdAt 순이라, 시각을 새로 찍으면 한 번에
+     * 넣은 기록들의 순서가 뒤섞인다. 그래서 원본 시각을 그대로 옮긴다.
+     */
+    public DesignDocCheckpoint duplicateTo(Workspace targetWorkspace) {
+        DesignDocCheckpoint copy = new DesignDocCheckpoint(
+                targetWorkspace,
+                this.label,
+                this.summary,
+                this.yjsUpdateBase64,
+                this.projectionJson,
+                this.createdBy
+        );
+
+        copy.createdAt = this.createdAt;
+
+        return copy;
+    }
+
     @PrePersist
     void onCreate() {
-        this.createdAt = LocalDateTime.now();
+        if (this.createdAt == null) {
+            this.createdAt = LocalDateTime.now();
+        }
     }
 }

@@ -11,7 +11,15 @@ import java.util.UUID;
 @Entity
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-@Table(name = "design_api_specs")
+@Table(
+        name = "design_api_specs",
+        uniqueConstraints = {
+                @UniqueConstraint(
+                        name = "uk_design_api_specs_workspace_uuid",
+                        columnNames = {"workspace_uuid", "uuid"}
+                )
+        }
+)
 public class DesignApiSpec {
 
     @Id
@@ -19,7 +27,8 @@ public class DesignApiSpec {
     private Long id;
 
     // 프론트/API에서 사용할 공개 ID
-    @Column(nullable = false, unique = true, updatable = false, length = 36)
+    // 워크스페이스 안에서만 유일하다. 이유는 DesignRequirement.uuid 와 같다(복제 시 Yjs 항목 id 공유).
+    @Column(nullable = false, updatable = false, length = 36)
     private String uuid;
 
     @ManyToOne(fetch = FetchType.LAZY)
@@ -73,6 +82,24 @@ public class DesignApiSpec {
         this.response = response;
     }
 
+    /** 프로젝트 복제용 사본. uuid 를 그대로 두는 이유는 DesignRequirement.duplicateTo 와 같다. */
+    public DesignApiSpec duplicateTo(Workspace targetWorkspace) {
+        DesignApiSpec copy = new DesignApiSpec();
+
+        copy.uuid = this.uuid;
+        copy.workspace = targetWorkspace;
+        copy.createdBy = this.createdBy;
+        copy.method = this.method;
+        copy.endpoint = this.endpoint;
+        copy.description = this.description;
+        copy.request = this.request;
+        copy.response = this.response;
+        copy.createdAt = this.createdAt;
+        copy.updatedAt = this.updatedAt;
+
+        return copy;
+    }
+
     public void update(
             String method,
             String endpoint,
@@ -90,8 +117,15 @@ public class DesignApiSpec {
     @PrePersist
     public void prePersist() {
         LocalDateTime now = LocalDateTime.now();
-        this.createdAt = now;
-        this.updatedAt = now;
+
+        // 복제본은 원본 시각을 들고 온다. 목록이 createdAt 순이라 순서를 지키려면 필요하다.
+        if (this.createdAt == null) {
+            this.createdAt = now;
+        }
+
+        if (this.updatedAt == null) {
+            this.updatedAt = now;
+        }
 
         if (this.uuid == null) {
             this.uuid = UUID.randomUUID().toString();

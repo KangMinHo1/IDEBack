@@ -109,6 +109,33 @@ public class Schedule {
         }
     }
 
+    /*
+     * 프로젝트 복제용 사본.
+     *
+     * 빌더를 쓰면 DONE 일정의 completedAt 이 "지금"으로 찍혀 완료일이 바뀐다.
+     * 복제본은 원본과 같은 일정이어야 하므로 시각까지 그대로 옮기고,
+     * id 와 uuid 만 새로 받는다(uuid 는 전역 UNIQUE 다).
+     */
+    public Schedule duplicateTo(Workspace targetWorkspace) {
+        Schedule copy = new Schedule();
+
+        copy.uuid = UUID.randomUUID().toString();
+        copy.workspace = targetWorkspace;
+        copy.createdBy = this.createdBy;
+        copy.assignee = this.assignee;
+        copy.title = this.title;
+        copy.description = this.description;
+        copy.startDate = this.startDate;
+        copy.endDate = this.endDate;
+        copy.status = this.status;
+        copy.category = this.category;
+        copy.createdAt = this.createdAt;
+        copy.updatedAt = this.updatedAt;
+        copy.completedAt = this.completedAt;
+
+        return copy;
+    }
+
     public void updateStatus(ScheduleStatus status) {
         applyStatus(status);
     }
@@ -191,8 +218,14 @@ public class Schedule {
         LocalDateTime now =
                 LocalDateTime.now();
 
-        this.createdAt = now;
-        this.updatedAt = now;
+        /* 복제본(duplicateTo)은 원본 시각을 들고 오므로 비어 있을 때만 채운다. */
+        if (this.createdAt == null) {
+            this.createdAt = now;
+        }
+
+        if (this.updatedAt == null) {
+            this.updatedAt = now;
+        }
 
         if (this.uuid == null) {
             this.uuid =

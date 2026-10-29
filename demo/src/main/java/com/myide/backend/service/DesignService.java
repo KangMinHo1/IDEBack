@@ -19,6 +19,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -65,15 +68,20 @@ public class DesignService {
         return DesignRequirementResponse.from(saved);
     }
 
+    /**
+     * workspaceId 는 null 일 수 있다(옛 경로 /api/design/requirements/{id}).
+     * 그때의 처리는 getAccessibleRequirement 참고.
+     */
     @Transactional
     public DesignRequirementResponse updateRequirement(
+            String workspaceId,
             String requirementId,
             Long userId,
             DesignRequirementRequest request
     ) {
         validateUserId(userId);
 
-        DesignRequirement requirement = getAccessibleRequirement(requirementId, userId);
+        DesignRequirement requirement = getAccessibleRequirement(workspaceId, requirementId, userId);
 
         requirement.update(
                 request.category(),
@@ -85,10 +93,10 @@ public class DesignService {
     }
 
     @Transactional
-    public void deleteRequirement(String requirementId, Long userId) {
+    public void deleteRequirement(String workspaceId, String requirementId, Long userId) {
         validateUserId(userId);
 
-        DesignRequirement requirement = getAccessibleRequirement(requirementId, userId);
+        DesignRequirement requirement = getAccessibleRequirement(workspaceId, requirementId, userId);
         requirementRepository.delete(requirement);
     }
 
@@ -130,8 +138,10 @@ public class DesignService {
         return DesignApiSpecResponse.from(saved);
     }
 
+    /** workspaceId 는 null 일 수 있다(옛 경로). updateRequirement 참고. */
     @Transactional
     public DesignApiSpecResponse updateApiSpec(
+            String workspaceId,
             String apiSpecId,
             Long userId,
             DesignApiSpecRequest request
@@ -139,7 +149,7 @@ public class DesignService {
         validateUserId(userId);
         validateMethod(request.method());
 
-        DesignApiSpec apiSpec = getAccessibleApiSpec(apiSpecId, userId);
+        DesignApiSpec apiSpec = getAccessibleApiSpec(workspaceId, apiSpecId, userId);
 
         apiSpec.update(
                 request.method(),
@@ -153,29 +163,85 @@ public class DesignService {
     }
 
     @Transactional
-    public void deleteApiSpec(String apiSpecId, Long userId) {
+    public void deleteApiSpec(String workspaceId, String apiSpecId, Long userId) {
         validateUserId(userId);
 
-        DesignApiSpec apiSpec = getAccessibleApiSpec(apiSpecId, userId);
+        DesignApiSpec apiSpec = getAccessibleApiSpec(workspaceId, apiSpecId, userId);
         apiSpecRepository.delete(apiSpec);
     }
 
-    private DesignRequirement getAccessibleRequirement(String requirementId, Long userId) {
-        DesignRequirement requirement = requirementRepository.findByUuid(requirementId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "요구사항을 찾을 수 없습니다."));
+    /*
+     * 요구사항·API 명세의 uuid 는 워크스페이스 안에서만 유일하다. 프로젝트를 복제하면
+     * 원본과 사본이 같은 uuid 를 가지므로(설계 문서의 항목 id 를 그대로 쓰기 때문)
+     * uuid 하나만으로는 어느 행인지 정할 수 없다.
+     *
+     * - workspaceId 가 있으면 그 워크스페이스에서만 찾는다.
+     * - 없으면(옛 경로) 내가 접근할 수 있는 워크스페이스의 행만 추린다. 하나면 그것을
+     *   쓰고, 둘 이상이면 원본·사본을 모두 가진 사용자라 어느 쪽인지 알 수 없으므로
+     *   임의로 고르지 않고 409 로 워크스페이스 경로를 쓰라고 알린다.
+     */
+    private DesignRequirement getAccessibleRequirement(String workspaceId, String requirementId, Long userId) {
+        if (workspaceId != null && !workspaceId.isBlank()) {
+            Workspace workspace = getAccessibleWorkspace(workspaceId, userId);
 
-        getAccessibleWorkspace(requirement.getWorkspace().getUuid(), userId);
+            return requirementRepository.findByUuidAndWorkspace_Uuid(requirementId, workspace.getUuid())
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "요구사항을 찾을 수 없습니다."));
+        }
 
-        return requirement;
+        List<DesignRequirement> candidates = requirementRepository.findAllByUuid(requirementId);
+
+        if (candidates.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "요구사항을 찾을 수 없습니다.");
+        }
+
+        return pickAccessible(candidates, row -> row.getWorkspace().getUuid(), userId, "요구사항");
     }
 
-    private DesignApiSpec getAccessibleApiSpec(String apiSpecId, Long userId) {
-        DesignApiSpec apiSpec = apiSpecRepository.findByUuid(apiSpecId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "API 명세서를 찾을 수 없습니다."));
+    private DesignApiSpec getAccessibleApiSpec(String workspaceId, String apiSpecId, Long userId) {
+        if (workspaceId != null && !workspaceId.isBlank()) {
+            Workspace workspace = getAccessibleWorkspace(workspaceId, userId);
 
-        getAccessibleWorkspace(apiSpec.getWorkspace().getUuid(), userId);
+            return apiSpecRepository.findByUuidAndWorkspace_Uuid(apiSpecId, workspace.getUuid())
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "API 명세서를 찾을 수 없습니다."));
+        }
 
-        return apiSpec;
+        List<DesignApiSpec> candidates = apiSpecRepository.findAllByUuid(apiSpecId);
+
+        if (candidates.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "API 명세서를 찾을 수 없습니다.");
+        }
+
+        return pickAccessible(candidates, row -> row.getWorkspace().getUuid(), userId, "API 명세서");
+    }
+
+    private <T> T pickAccessible(
+            List<T> candidates,
+            Function<T, String> workspaceOf,
+            Long userId,
+            String label
+    ) {
+        Set<String> accessible = workspaceRepository.findMyAllWorkspaces(userId)
+                .stream()
+                .map(Workspace::getUuid)
+                .collect(Collectors.toSet());
+
+        List<T> mine = candidates.stream()
+                .filter(row -> accessible.contains(workspaceOf.apply(row)))
+                .toList();
+
+        if (mine.isEmpty()) {
+            // 예전과 같은 응답: 행은 있지만 내 워크스페이스가 아니다.
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "워크스페이스 접근 권한이 없습니다.");
+        }
+
+        if (mine.size() > 1) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "같은 ID 의 " + label + "이(가) 여러 프로젝트에 있습니다. "
+                            + "/api/workspaces/{workspaceId}/design/... 경로로 요청해주세요.");
+        }
+
+        return mine.get(0);
     }
 
     private Workspace getAccessibleWorkspace(String workspaceId, Long userId) {
