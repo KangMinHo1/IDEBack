@@ -74,7 +74,7 @@ public class CommunityInteractionService {
     public PostDto.InteractionResponse toggleComment(Long postId, Long commentId, Long userId) {
         user(userId); lockComment(postId, commentId);
         boolean active = count("select count(*) from comment_likes where comment_id=? and user_id=?", commentId,userId) == 0;
-        if (active) jdbc.update("insert into comment_likes(comment_id,user_id) values (?,?)",commentId,userId);
+        if (active) jdbc.update("insert into comment_likes(comment_id,user_id,created_at,updated_at) values (?,?,CURRENT_TIMESTAMP(6),CURRENT_TIMESTAMP(6))",commentId,userId);
         else jdbc.update("delete from comment_likes where comment_id=? and user_id=?",commentId,userId);
         return PostDto.InteractionResponse.builder().active(active)
                 .count(Math.toIntExact(count("select count(*) from comment_likes where comment_id=?",commentId))).build();
@@ -90,7 +90,7 @@ public class CommunityInteractionService {
         if (author.equals(userId)) throw new ResponseStatusException(HttpStatus.FORBIDDEN, "본인의 댓글은 신고할 수 없습니다.");
         if (count("select count(*) from comment_reports where comment_id=? and reporter_id=?",commentId,userId)>0)
             throw new ResponseStatusException(HttpStatus.CONFLICT, "이미 신고한 댓글입니다.");
-        jdbc.update("insert into comment_reports(comment_id,reporter_id,reason,content,status) values (?,?,?,?, 'PENDING')",commentId,userId,request.getReason().name(),content.isEmpty()?null:content);
+        jdbc.update("insert into comment_reports(comment_id,reporter_id,reason,content,status,created_at,updated_at) values (?,?,?,?, 'PENDING',CURRENT_TIMESTAMP(6),CURRENT_TIMESTAMP(6))",commentId,userId,request.getReason().name(),content.isEmpty()?null:content);
         return Map.of("commentId",commentId,"status","PENDING");
     }
 }

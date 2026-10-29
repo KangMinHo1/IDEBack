@@ -145,6 +145,8 @@ public class PostService {
         jdbc.update("delete from post_reports where post_id=?", postId);
         jdbc.update("delete from post_likes where post_id=?", postId);
         jdbc.update("delete from post_scraps where post_id=?", postId);
+        jdbc.update("delete from comment_likes where comment_id in (select id from comments where post_id=?)", postId);
+        jdbc.update("delete from comment_reports where comment_id in (select id from comments where post_id=?)", postId);
         jdbc.update("delete from comments where post_id=?", postId);
         postRepository.delete(post);
     }

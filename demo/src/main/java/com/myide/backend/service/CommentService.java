@@ -26,6 +26,8 @@ public class CommentService {
 
     private final UserRepository userRepository;
 
+    private final org.springframework.jdbc.core.JdbcTemplate jdbc;
+
 
     // ==========================================
     // 댓글 목록 조회
@@ -313,6 +315,8 @@ public class CommentService {
         }
 
 
+        jdbc.update("delete from comment_likes where comment_id=?", comment.getId());
+        jdbc.update("delete from comment_reports where comment_id=?", comment.getId());
         commentRepository.delete(
                 comment
         );
