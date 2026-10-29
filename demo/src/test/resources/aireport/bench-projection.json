@@ -1,0 +1,1616 @@
+{
+  "schemaVersion": 2,
+  "meta": {
+    "projectSummary": "같은 학교 학생끼리 관심 주제로 스터디를 만들고 참여하는 매칭 웹 서비스",
+    "techStack": {
+      "backend": "Spring Boot",
+      "frontend": "React",
+      "db": "MySQL"
+    }
+  },
+  "requirements": [
+    {
+      "id": "req_01",
+      "code": "R-01",
+      "category": "회원",
+      "name": "회원가입/로그인",
+      "description": "학교 이메일로 가입하고 JWT 로 로그인한다. 토큰 만료 시 재발급한다.",
+      "priority": "must",
+      "screenIds": [
+        "scr_login",
+        "scr_signup"
+      ],
+      "apiIds": [
+        "api_signup",
+        "api_login",
+        "api_refresh"
+      ]
+    },
+    {
+      "id": "req_02",
+      "code": "R-02",
+      "category": "회원",
+      "name": "프로필 관리",
+      "description": "관심 분야와 소개를 수정한다.",
+      "priority": "should",
+      "screenIds": [
+        "scr_profile"
+      ],
+      "apiIds": [
+        "api_me",
+        "api_me_update"
+      ]
+    },
+    {
+      "id": "req_03",
+      "code": "R-03",
+      "category": "스터디",
+      "name": "스터디 개설",
+      "description": "주제, 정원, 모임 방식(온라인/오프라인)을 정해 스터디를 만든다.",
+      "priority": "must",
+      "screenIds": [
+        "scr_create"
+      ],
+      "apiIds": [
+        "api_study_create"
+      ]
+    },
+    {
+      "id": "req_04",
+      "code": "R-04",
+      "category": "스터디",
+      "name": "스터디 검색/필터",
+      "description": "주제, 모집 상태, 모임 방식으로 스터디를 찾는다.",
+      "priority": "must",
+      "screenIds": [
+        "scr_main",
+        "scr_detail"
+      ],
+      "apiIds": [
+        "api_study_list",
+        "api_study_detail"
+      ]
+    },
+    {
+      "id": "req_05",
+      "code": "R-05",
+      "category": "스터디",
+      "name": "참가 신청/승인",
+      "description": "참가를 신청하면 스터디장이 승인하거나 거절한다.",
+      "priority": "must",
+      "screenIds": [
+        "scr_detail",
+        "scr_apply_manage"
+      ],
+      "apiIds": [
+        "api_apply",
+        "api_apply_list",
+        "api_apply_decide"
+      ]
+    },
+    {
+      "id": "req_06",
+      "code": "R-06",
+      "category": "일정",
+      "name": "일정 관리",
+      "description": "스터디 모임 일정을 등록하고 캘린더로 본다.",
+      "priority": "should",
+      "screenIds": [
+        "scr_calendar"
+      ],
+      "apiIds": [
+        "api_schedule_list",
+        "api_schedule_create"
+      ]
+    },
+    {
+      "id": "req_07",
+      "code": "R-07",
+      "category": "게시판",
+      "name": "스터디 게시판",
+      "description": "스터디원끼리 자료와 공지를 글로 공유하고 댓글을 단다.",
+      "priority": "should",
+      "screenIds": [
+        "scr_board",
+        "scr_post"
+      ],
+      "apiIds": [
+        "api_post_list",
+        "api_post_create",
+        "api_post_detail",
+        "api_comment_create"
+      ]
+    },
+    {
+      "id": "req_08",
+      "code": "R-08",
+      "category": "소통",
+      "name": "실시간 채팅",
+      "description": "스터디원끼리 실시간으로 대화한다.",
+      "priority": "could",
+      "screenIds": [],
+      "apiIds": []
+    },
+    {
+      "id": "req_09",
+      "code": "R-09",
+      "category": "스터디",
+      "name": "출석 체크",
+      "description": "모임마다 출석을 기록하고 출석률을 보여 준다.",
+      "priority": "should",
+      "screenIds": [
+        "scr_calendar"
+      ],
+      "apiIds": [
+        "api_attendance"
+      ]
+    },
+    {
+      "id": "req_10",
+      "code": "R-10",
+      "category": "알림",
+      "name": "모임 알림",
+      "description": "모임 하루 전에 알림을 보낸다.",
+      "priority": "could",
+      "screenIds": [],
+      "apiIds": []
+    }
+  ],
+  "screens": [
+    {
+      "id": "scr_main",
+      "key": "/",
+      "name": "스터디 목록",
+      "description": "모집 중인 스터디를 카드로 보여 주고 검색 필터를 제공한다.",
+      "role": "page",
+      "isEntry": true,
+      "requiresAuth": false,
+      "requirementIds": [
+        "req_04"
+      ],
+      "apiIds": [
+        "api_study_list"
+      ],
+      "layout": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": "scr_login",
+      "key": "/login",
+      "name": "로그인",
+      "description": "이메일과 비밀번호 입력",
+      "role": "page",
+      "isEntry": false,
+      "requiresAuth": false,
+      "requirementIds": [
+        "req_01"
+      ],
+      "apiIds": [
+        "api_login"
+      ],
+      "layout": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": "scr_signup",
+      "key": "/signup",
+      "name": "회원가입",
+      "description": "학교 이메일 인증 후 가입",
+      "role": "page",
+      "isEntry": false,
+      "requiresAuth": false,
+      "requirementIds": [
+        "req_01"
+      ],
+      "apiIds": [
+        "api_signup"
+      ],
+      "layout": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": "scr_detail",
+      "key": "/studies/:id",
+      "name": "스터디 상세",
+      "description": "스터디 소개, 정원, 참가 신청 버튼",
+      "role": "page",
+      "isEntry": false,
+      "requiresAuth": false,
+      "requirementIds": [
+        "req_04",
+        "req_05"
+      ],
+      "apiIds": [
+        "api_study_detail",
+        "api_apply"
+      ],
+      "layout": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": "scr_create",
+      "key": "/studies/new",
+      "name": "스터디 개설",
+      "description": "스터디 정보 입력 폼",
+      "role": "page",
+      "isEntry": false,
+      "requiresAuth": true,
+      "requirementIds": [
+        "req_03"
+      ],
+      "apiIds": [
+        "api_study_create"
+      ],
+      "layout": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": "scr_apply_manage",
+      "key": "/studies/:id/applications",
+      "name": "신청 관리",
+      "description": "스터디장이 신청을 승인/거절",
+      "role": "page",
+      "isEntry": false,
+      "requiresAuth": true,
+      "requirementIds": [
+        "req_05"
+      ],
+      "apiIds": [
+        "api_apply_list",
+        "api_apply_decide"
+      ],
+      "layout": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": "scr_my",
+      "key": "/me/studies",
+      "name": "내 스터디",
+      "description": "참여 중인 스터디 목록",
+      "role": "page",
+      "isEntry": false,
+      "requiresAuth": true,
+      "requirementIds": [],
+      "apiIds": [],
+      "layout": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": "scr_calendar",
+      "key": "/studies/:id/schedules",
+      "name": "일정 캘린더",
+      "description": "모임 일정과 출석 현황",
+      "role": "page",
+      "isEntry": false,
+      "requiresAuth": true,
+      "requirementIds": [
+        "req_06",
+        "req_09"
+      ],
+      "apiIds": [
+        "api_schedule_list",
+        "api_schedule_create",
+        "api_attendance"
+      ],
+      "layout": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": "scr_board",
+      "key": "/studies/:id/posts",
+      "name": "스터디 게시판",
+      "description": "글 목록",
+      "role": "page",
+      "isEntry": false,
+      "requiresAuth": true,
+      "requirementIds": [
+        "req_07"
+      ],
+      "apiIds": [
+        "api_post_list",
+        "api_post_create"
+      ],
+      "layout": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": "scr_post",
+      "key": "/studies/:id/posts/:postId",
+      "name": "게시글 상세",
+      "description": "본문과 댓글",
+      "role": "page",
+      "isEntry": false,
+      "requiresAuth": true,
+      "requirementIds": [
+        "req_07"
+      ],
+      "apiIds": [
+        "api_post_detail",
+        "api_comment_create"
+      ],
+      "layout": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": "scr_profile",
+      "key": "/me",
+      "name": "프로필",
+      "description": "내 정보 수정",
+      "role": "page",
+      "isEntry": false,
+      "requiresAuth": true,
+      "requirementIds": [
+        "req_02"
+      ],
+      "apiIds": [
+        "api_me",
+        "api_me_update"
+      ],
+      "layout": {
+        "x": 0,
+        "y": 0
+      }
+    }
+  ],
+  "screenTransitions": [
+    {
+      "id": "trn_01",
+      "from": "scr_main",
+      "to": "scr_detail",
+      "trigger": "스터디 카드 클릭",
+      "kind": "navigate",
+      "condition": "",
+      "apiIds": []
+    },
+    {
+      "id": "trn_02",
+      "from": "scr_main",
+      "to": "scr_login",
+      "trigger": "로그인 버튼",
+      "kind": "navigate",
+      "condition": "",
+      "apiIds": []
+    },
+    {
+      "id": "trn_03",
+      "from": "scr_login",
+      "to": "scr_signup",
+      "trigger": "회원가입 링크",
+      "kind": "navigate",
+      "condition": "",
+      "apiIds": []
+    },
+    {
+      "id": "trn_04",
+      "from": "scr_signup",
+      "to": "scr_login",
+      "trigger": "가입 완료",
+      "kind": "navigate",
+      "condition": "이메일 인증 성공",
+      "apiIds": []
+    },
+    {
+      "id": "trn_05",
+      "from": "scr_login",
+      "to": "scr_main",
+      "trigger": "로그인 성공",
+      "kind": "navigate",
+      "condition": "",
+      "apiIds": []
+    },
+    {
+      "id": "trn_06",
+      "from": "scr_main",
+      "to": "scr_create",
+      "trigger": "스터디 만들기",
+      "kind": "navigate",
+      "condition": "로그인 상태",
+      "apiIds": []
+    },
+    {
+      "id": "trn_07",
+      "from": "scr_create",
+      "to": "scr_detail",
+      "trigger": "개설 완료",
+      "kind": "navigate",
+      "condition": "",
+      "apiIds": []
+    },
+    {
+      "id": "trn_08",
+      "from": "scr_detail",
+      "to": "scr_apply_manage",
+      "trigger": "신청 관리",
+      "kind": "navigate",
+      "condition": "스터디장일 때",
+      "apiIds": []
+    },
+    {
+      "id": "trn_09",
+      "from": "scr_main",
+      "to": "scr_my",
+      "trigger": "내 스터디 메뉴",
+      "kind": "navigate",
+      "condition": "",
+      "apiIds": []
+    },
+    {
+      "id": "trn_10",
+      "from": "scr_my",
+      "to": "scr_calendar",
+      "trigger": "일정 탭",
+      "kind": "navigate",
+      "condition": "",
+      "apiIds": []
+    },
+    {
+      "id": "trn_11",
+      "from": "scr_my",
+      "to": "scr_board",
+      "trigger": "게시판 탭",
+      "kind": "navigate",
+      "condition": "",
+      "apiIds": []
+    },
+    {
+      "id": "trn_12",
+      "from": "scr_board",
+      "to": "scr_post",
+      "trigger": "글 클릭",
+      "kind": "navigate",
+      "condition": "",
+      "apiIds": []
+    },
+    {
+      "id": "trn_13",
+      "from": "scr_main",
+      "to": "scr_profile",
+      "trigger": "프로필 메뉴",
+      "kind": "navigate",
+      "condition": "",
+      "apiIds": []
+    },
+    {
+      "id": "trn_14",
+      "from": "scr_detail",
+      "to": "scr_login",
+      "trigger": "참가 신청",
+      "kind": "navigate",
+      "condition": "비로그인 상태",
+      "apiIds": []
+    }
+  ],
+  "apis": [
+    {
+      "id": "api_signup",
+      "method": "POST",
+      "endpoint": "/api/auth/signup",
+      "description": "회원가입",
+      "request": "{\"email\": \"string\", \"password\": \"string\", \"nickname\": \"string\", \"major\": \"string\"}",
+      "response": "{\"userId\": 1}",
+      "auth": false,
+      "crud": "C",
+      "requirementIds": [
+        "req_01"
+      ],
+      "screenIds": [
+        "scr_signup"
+      ],
+      "tableIds": [
+        "tbl_users"
+      ]
+    },
+    {
+      "id": "api_login",
+      "method": "POST",
+      "endpoint": "/api/auth/login",
+      "description": "로그인",
+      "request": "{\"email\": \"string\", \"password\": \"string\"}",
+      "response": "{\"accessToken\": \"string\", \"refreshToken\": \"string\"}",
+      "auth": false,
+      "crud": "R",
+      "requirementIds": [
+        "req_01"
+      ],
+      "screenIds": [
+        "scr_login"
+      ],
+      "tableIds": [
+        "tbl_users"
+      ]
+    },
+    {
+      "id": "api_refresh",
+      "method": "POST",
+      "endpoint": "/api/auth/refresh",
+      "description": "토큰 재발급",
+      "request": "{\"refreshToken\": \"string\"}",
+      "response": "{\"accessToken\": \"string\"}",
+      "auth": false,
+      "crud": "R",
+      "requirementIds": [
+        "req_01"
+      ],
+      "screenIds": [],
+      "tableIds": [
+        "tbl_users"
+      ]
+    },
+    {
+      "id": "api_me",
+      "method": "GET",
+      "endpoint": "/api/users/me",
+      "description": "내 정보 조회",
+      "request": "",
+      "response": "{\"id\": 1, \"nickname\": \"string\", \"major\": \"string\", \"interests\": [\"string\"]}",
+      "auth": true,
+      "crud": "R",
+      "requirementIds": [
+        "req_02"
+      ],
+      "screenIds": [
+        "scr_profile"
+      ],
+      "tableIds": [
+        "tbl_users"
+      ]
+    },
+    {
+      "id": "api_me_update",
+      "method": "PATCH",
+      "endpoint": "/api/users/me",
+      "description": "내 정보 수정",
+      "request": "{\"nickname\": \"string\", \"interests\": [\"string\"], \"bio\": \"string\"}",
+      "response": "{\"id\": 1}",
+      "auth": true,
+      "crud": "U",
+      "requirementIds": [
+        "req_02"
+      ],
+      "screenIds": [
+        "scr_profile"
+      ],
+      "tableIds": [
+        "tbl_users"
+      ]
+    },
+    {
+      "id": "api_study_create",
+      "method": "POST",
+      "endpoint": "/api/studies",
+      "description": "스터디 개설",
+      "request": "{\"title\": \"string\", \"topic\": \"string\", \"capacity\": 6, \"mode\": \"ONLINE|OFFLINE\", \"description\": \"string\"}",
+      "response": "{\"studyId\": 1}",
+      "auth": true,
+      "crud": "C",
+      "requirementIds": [
+        "req_03"
+      ],
+      "screenIds": [
+        "scr_create"
+      ],
+      "tableIds": [
+        "tbl_studies",
+        "tbl_members"
+      ]
+    },
+    {
+      "id": "api_study_list",
+      "method": "GET",
+      "endpoint": "/api/studies",
+      "description": "스터디 목록/검색",
+      "request": "{\"topic\": \"string\", \"status\": \"RECRUITING\", \"mode\": \"ONLINE\", \"page\": 0}",
+      "response": "{\"content\": [{\"id\": 1, \"title\": \"string\", \"memberCount\": 3, \"capacity\": 6}], \"totalPages\": 1}",
+      "auth": false,
+      "crud": "R",
+      "requirementIds": [
+        "req_04"
+      ],
+      "screenIds": [
+        "scr_main"
+      ],
+      "tableIds": [
+        "tbl_studies"
+      ]
+    },
+    {
+      "id": "api_study_detail",
+      "method": "GET",
+      "endpoint": "/api/studies/{id}",
+      "description": "스터디 상세",
+      "request": "",
+      "response": "{\"id\": 1, \"title\": \"string\", \"leader\": {\"id\": 1, \"nickname\": \"string\"}, \"members\": [{\"id\": 2}]}",
+      "auth": false,
+      "crud": "R",
+      "requirementIds": [
+        "req_04"
+      ],
+      "screenIds": [
+        "scr_detail"
+      ],
+      "tableIds": [
+        "tbl_studies",
+        "tbl_members"
+      ]
+    },
+    {
+      "id": "api_study_update",
+      "method": "PUT",
+      "endpoint": "/api/studies/{id}",
+      "description": "스터디 수정",
+      "request": "{\"title\": \"string\", \"capacity\": 6, \"status\": \"CLOSED\"}",
+      "response": "{\"id\": 1}",
+      "auth": true,
+      "crud": "U",
+      "requirementIds": [],
+      "screenIds": [],
+      "tableIds": [
+        "tbl_studies"
+      ]
+    },
+    {
+      "id": "api_study_delete",
+      "method": "DELETE",
+      "endpoint": "/api/studies/{id}",
+      "description": "스터디 삭제",
+      "request": "",
+      "response": "",
+      "auth": true,
+      "crud": "D",
+      "requirementIds": [],
+      "screenIds": [],
+      "tableIds": [
+        "tbl_studies"
+      ]
+    },
+    {
+      "id": "api_apply",
+      "method": "POST",
+      "endpoint": "/api/studies/{id}/applications",
+      "description": "참가 신청",
+      "request": "{\"message\": \"string\"}",
+      "response": "{\"applicationId\": 1, \"status\": \"PENDING\"}",
+      "auth": true,
+      "crud": "C",
+      "requirementIds": [
+        "req_05"
+      ],
+      "screenIds": [
+        "scr_detail"
+      ],
+      "tableIds": [
+        "tbl_applications"
+      ]
+    },
+    {
+      "id": "api_apply_list",
+      "method": "GET",
+      "endpoint": "/api/studies/{id}/applications",
+      "description": "신청 목록",
+      "request": "",
+      "response": "[{\"id\": 1, \"applicant\": {\"nickname\": \"string\"}, \"status\": \"PENDING\"}]",
+      "auth": true,
+      "crud": "R",
+      "requirementIds": [
+        "req_05"
+      ],
+      "screenIds": [
+        "scr_apply_manage"
+      ],
+      "tableIds": [
+        "tbl_applications"
+      ]
+    },
+    {
+      "id": "api_apply_decide",
+      "method": "PATCH",
+      "endpoint": "/api/applications/{id}",
+      "description": "신청 승인/거절",
+      "request": "{\"decision\": \"APPROVE|REJECT\"}",
+      "response": "{\"status\": \"APPROVED\"}",
+      "auth": true,
+      "crud": "U",
+      "requirementIds": [
+        "req_05"
+      ],
+      "screenIds": [
+        "scr_apply_manage"
+      ],
+      "tableIds": [
+        "tbl_applications",
+        "tbl_members"
+      ]
+    },
+    {
+      "id": "api_schedule_list",
+      "method": "GET",
+      "endpoint": "/api/studies/{id}/schedules",
+      "description": "일정 목록",
+      "request": "{\"month\": \"2026-05\"}",
+      "response": "[{\"id\": 1, \"title\": \"string\", \"startAt\": \"datetime\"}]",
+      "auth": true,
+      "crud": "R",
+      "requirementIds": [
+        "req_06"
+      ],
+      "screenIds": [
+        "scr_calendar"
+      ],
+      "tableIds": [
+        "tbl_schedules"
+      ]
+    },
+    {
+      "id": "api_schedule_create",
+      "method": "POST",
+      "endpoint": "/api/studies/{id}/schedules",
+      "description": "일정 등록",
+      "request": "{\"title\": \"string\", \"startAt\": \"datetime\", \"place\": \"string\"}",
+      "response": "{\"scheduleId\": 1}",
+      "auth": true,
+      "crud": "C",
+      "requirementIds": [
+        "req_06"
+      ],
+      "screenIds": [
+        "scr_calendar"
+      ],
+      "tableIds": [
+        "tbl_schedules"
+      ]
+    },
+    {
+      "id": "api_attendance",
+      "method": "POST",
+      "endpoint": "/api/schedules/{id}/attendances",
+      "description": "출석 체크",
+      "request": "{\"userId\": 1, \"status\": \"PRESENT|LATE|ABSENT\"}",
+      "response": "{\"attendanceId\": 1}",
+      "auth": true,
+      "crud": "C",
+      "requirementIds": [
+        "req_09"
+      ],
+      "screenIds": [
+        "scr_calendar"
+      ],
+      "tableIds": []
+    },
+    {
+      "id": "api_post_list",
+      "method": "GET",
+      "endpoint": "/api/studies/{id}/posts",
+      "description": "게시글 목록",
+      "request": "{\"page\": 0}",
+      "response": "{\"content\": [{\"id\": 1, \"title\": \"string\"}]}",
+      "auth": true,
+      "crud": "R",
+      "requirementIds": [
+        "req_07"
+      ],
+      "screenIds": [
+        "scr_board"
+      ],
+      "tableIds": [
+        "tbl_posts"
+      ]
+    },
+    {
+      "id": "api_post_create",
+      "method": "POST",
+      "endpoint": "/api/studies/{id}/posts",
+      "description": "게시글 작성",
+      "request": "{\"title\": \"string\", \"content\": \"string\", \"notice\": false}",
+      "response": "{\"postId\": 1}",
+      "auth": true,
+      "crud": "C",
+      "requirementIds": [
+        "req_07"
+      ],
+      "screenIds": [
+        "scr_board"
+      ],
+      "tableIds": [
+        "tbl_posts"
+      ]
+    },
+    {
+      "id": "api_post_detail",
+      "method": "GET",
+      "endpoint": "/api/posts/{id}",
+      "description": "게시글 상세",
+      "request": "",
+      "response": "{\"id\": 1, \"title\": \"string\", \"content\": \"string\", \"comments\": [{\"id\": 1, \"content\": \"string\"}]}",
+      "auth": true,
+      "crud": "R",
+      "requirementIds": [
+        "req_07"
+      ],
+      "screenIds": [
+        "scr_post"
+      ],
+      "tableIds": [
+        "tbl_posts",
+        "tbl_comments"
+      ]
+    },
+    {
+      "id": "api_comment_create",
+      "method": "POST",
+      "endpoint": "/api/posts/{id}/comments",
+      "description": "댓글 작성",
+      "request": "{\"content\": \"string\"}",
+      "response": "{\"commentId\": 1}",
+      "auth": true,
+      "crud": "C",
+      "requirementIds": [
+        "req_07"
+      ],
+      "screenIds": [
+        "scr_post"
+      ],
+      "tableIds": [
+        "tbl_comments"
+      ]
+    }
+  ],
+  "erd": {
+    "tables": [
+      {
+        "id": "tbl_users",
+        "name": "users",
+        "entityName": "User",
+        "description": "회원",
+        "columns": [
+          {
+            "id": "col_users_0",
+            "name": "id",
+            "type": "BIGINT",
+            "length": null,
+            "nullable": false,
+            "isPk": true,
+            "isFk": false,
+            "defaultValue": "",
+            "comment": ""
+          },
+          {
+            "id": "col_users_1",
+            "name": "email",
+            "type": "VARCHAR",
+            "length": 100,
+            "nullable": false,
+            "isPk": false,
+            "isFk": false,
+            "defaultValue": "",
+            "comment": "학교 이메일"
+          },
+          {
+            "id": "col_users_2",
+            "name": "password",
+            "type": "VARCHAR",
+            "length": 255,
+            "nullable": false,
+            "isPk": false,
+            "isFk": false,
+            "defaultValue": "",
+            "comment": ""
+          },
+          {
+            "id": "col_users_3",
+            "name": "nickname",
+            "type": "VARCHAR",
+            "length": 30,
+            "nullable": false,
+            "isPk": false,
+            "isFk": false,
+            "defaultValue": "",
+            "comment": ""
+          },
+          {
+            "id": "col_users_4",
+            "name": "major",
+            "type": "VARCHAR",
+            "length": 50,
+            "nullable": true,
+            "isPk": false,
+            "isFk": false,
+            "defaultValue": "",
+            "comment": ""
+          },
+          {
+            "id": "col_users_5",
+            "name": "bio",
+            "type": "TEXT",
+            "length": null,
+            "nullable": true,
+            "isPk": false,
+            "isFk": false,
+            "defaultValue": "",
+            "comment": ""
+          },
+          {
+            "id": "col_users_6",
+            "name": "created_at",
+            "type": "DATETIME",
+            "length": null,
+            "nullable": false,
+            "isPk": false,
+            "isFk": false,
+            "defaultValue": "",
+            "comment": ""
+          }
+        ],
+        "layout": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": "tbl_studies",
+        "name": "studies",
+        "entityName": "Study",
+        "description": "스터디 모임",
+        "columns": [
+          {
+            "id": "col_studies_0",
+            "name": "id",
+            "type": "BIGINT",
+            "length": null,
+            "nullable": false,
+            "isPk": true,
+            "isFk": false,
+            "defaultValue": "",
+            "comment": ""
+          },
+          {
+            "id": "col_studies_1",
+            "name": "leader_id",
+            "type": "BIGINT",
+            "length": null,
+            "nullable": false,
+            "isPk": false,
+            "isFk": true,
+            "defaultValue": "",
+            "comment": "스터디장"
+          },
+          {
+            "id": "col_studies_2",
+            "name": "title",
+            "type": "VARCHAR",
+            "length": 100,
+            "nullable": false,
+            "isPk": false,
+            "isFk": false,
+            "defaultValue": "",
+            "comment": ""
+          },
+          {
+            "id": "col_studies_3",
+            "name": "topic",
+            "type": "VARCHAR",
+            "length": 50,
+            "nullable": false,
+            "isPk": false,
+            "isFk": false,
+            "defaultValue": "",
+            "comment": ""
+          },
+          {
+            "id": "col_studies_4",
+            "name": "capacity",
+            "type": "INT",
+            "length": null,
+            "nullable": false,
+            "isPk": false,
+            "isFk": false,
+            "defaultValue": "",
+            "comment": ""
+          },
+          {
+            "id": "col_studies_5",
+            "name": "mode",
+            "type": "VARCHAR",
+            "length": 10,
+            "nullable": false,
+            "isPk": false,
+            "isFk": false,
+            "defaultValue": "",
+            "comment": "ONLINE/OFFLINE"
+          },
+          {
+            "id": "col_studies_6",
+            "name": "status",
+            "type": "VARCHAR",
+            "length": 20,
+            "nullable": false,
+            "isPk": false,
+            "isFk": false,
+            "defaultValue": "",
+            "comment": "RECRUITING/CLOSED"
+          },
+          {
+            "id": "col_studies_7",
+            "name": "created_at",
+            "type": "DATETIME",
+            "length": null,
+            "nullable": false,
+            "isPk": false,
+            "isFk": false,
+            "defaultValue": "",
+            "comment": ""
+          }
+        ],
+        "layout": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": "tbl_members",
+        "name": "study_members",
+        "entityName": "StudyMember",
+        "description": "스터디 참여자",
+        "columns": [
+          {
+            "id": "col_members_0",
+            "name": "id",
+            "type": "BIGINT",
+            "length": null,
+            "nullable": false,
+            "isPk": true,
+            "isFk": false,
+            "defaultValue": "",
+            "comment": ""
+          },
+          {
+            "id": "col_members_1",
+            "name": "study_id",
+            "type": "BIGINT",
+            "length": null,
+            "nullable": false,
+            "isPk": false,
+            "isFk": true,
+            "defaultValue": "",
+            "comment": ""
+          },
+          {
+            "id": "col_members_2",
+            "name": "user_id",
+            "type": "BIGINT",
+            "length": null,
+            "nullable": false,
+            "isPk": false,
+            "isFk": true,
+            "defaultValue": "",
+            "comment": ""
+          },
+          {
+            "id": "col_members_3",
+            "name": "role",
+            "type": "VARCHAR",
+            "length": 10,
+            "nullable": false,
+            "isPk": false,
+            "isFk": false,
+            "defaultValue": "",
+            "comment": "LEADER/MEMBER"
+          },
+          {
+            "id": "col_members_4",
+            "name": "joined_at",
+            "type": "DATETIME",
+            "length": null,
+            "nullable": false,
+            "isPk": false,
+            "isFk": false,
+            "defaultValue": "",
+            "comment": ""
+          }
+        ],
+        "layout": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": "tbl_applications",
+        "name": "applications",
+        "entityName": "Application",
+        "description": "참가 신청",
+        "columns": [
+          {
+            "id": "col_applications_0",
+            "name": "id",
+            "type": "BIGINT",
+            "length": null,
+            "nullable": false,
+            "isPk": true,
+            "isFk": false,
+            "defaultValue": "",
+            "comment": ""
+          },
+          {
+            "id": "col_applications_1",
+            "name": "study_id",
+            "type": "BIGINT",
+            "length": null,
+            "nullable": false,
+            "isPk": false,
+            "isFk": true,
+            "defaultValue": "",
+            "comment": ""
+          },
+          {
+            "id": "col_applications_2",
+            "name": "user_id",
+            "type": "BIGINT",
+            "length": null,
+            "nullable": false,
+            "isPk": false,
+            "isFk": true,
+            "defaultValue": "",
+            "comment": ""
+          },
+          {
+            "id": "col_applications_3",
+            "name": "message",
+            "type": "VARCHAR",
+            "length": 500,
+            "nullable": true,
+            "isPk": false,
+            "isFk": false,
+            "defaultValue": "",
+            "comment": ""
+          },
+          {
+            "id": "col_applications_4",
+            "name": "status",
+            "type": "VARCHAR",
+            "length": 20,
+            "nullable": false,
+            "isPk": false,
+            "isFk": false,
+            "defaultValue": "",
+            "comment": ""
+          },
+          {
+            "id": "col_applications_5",
+            "name": "created_at",
+            "type": "DATETIME",
+            "length": null,
+            "nullable": false,
+            "isPk": false,
+            "isFk": false,
+            "defaultValue": "",
+            "comment": ""
+          }
+        ],
+        "layout": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": "tbl_schedules",
+        "name": "schedules",
+        "entityName": "Schedule",
+        "description": "모임 일정",
+        "columns": [
+          {
+            "id": "col_schedules_0",
+            "name": "id",
+            "type": "BIGINT",
+            "length": null,
+            "nullable": false,
+            "isPk": true,
+            "isFk": false,
+            "defaultValue": "",
+            "comment": ""
+          },
+          {
+            "id": "col_schedules_1",
+            "name": "study_id",
+            "type": "BIGINT",
+            "length": null,
+            "nullable": false,
+            "isPk": false,
+            "isFk": true,
+            "defaultValue": "",
+            "comment": ""
+          },
+          {
+            "id": "col_schedules_2",
+            "name": "title",
+            "type": "VARCHAR",
+            "length": 100,
+            "nullable": false,
+            "isPk": false,
+            "isFk": false,
+            "defaultValue": "",
+            "comment": ""
+          },
+          {
+            "id": "col_schedules_3",
+            "name": "start_at",
+            "type": "DATETIME",
+            "length": null,
+            "nullable": false,
+            "isPk": false,
+            "isFk": false,
+            "defaultValue": "",
+            "comment": ""
+          },
+          {
+            "id": "col_schedules_4",
+            "name": "place",
+            "type": "VARCHAR",
+            "length": 100,
+            "nullable": true,
+            "isPk": false,
+            "isFk": false,
+            "defaultValue": "",
+            "comment": ""
+          }
+        ],
+        "layout": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": "tbl_attendances",
+        "name": "attendances",
+        "entityName": "Attendance",
+        "description": "출석 기록",
+        "columns": [
+          {
+            "id": "col_attendances_0",
+            "name": "id",
+            "type": "BIGINT",
+            "length": null,
+            "nullable": false,
+            "isPk": true,
+            "isFk": false,
+            "defaultValue": "",
+            "comment": ""
+          },
+          {
+            "id": "col_attendances_1",
+            "name": "schedule_id",
+            "type": "BIGINT",
+            "length": null,
+            "nullable": false,
+            "isPk": false,
+            "isFk": true,
+            "defaultValue": "",
+            "comment": ""
+          },
+          {
+            "id": "col_attendances_2",
+            "name": "user_id",
+            "type": "BIGINT",
+            "length": null,
+            "nullable": false,
+            "isPk": false,
+            "isFk": true,
+            "defaultValue": "",
+            "comment": ""
+          },
+          {
+            "id": "col_attendances_3",
+            "name": "status",
+            "type": "VARCHAR",
+            "length": 10,
+            "nullable": false,
+            "isPk": false,
+            "isFk": false,
+            "defaultValue": "",
+            "comment": ""
+          }
+        ],
+        "layout": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": "tbl_posts",
+        "name": "posts",
+        "entityName": "Post",
+        "description": "스터디 게시글",
+        "columns": [
+          {
+            "id": "col_posts_0",
+            "name": "id",
+            "type": "BIGINT",
+            "length": null,
+            "nullable": false,
+            "isPk": true,
+            "isFk": false,
+            "defaultValue": "",
+            "comment": ""
+          },
+          {
+            "id": "col_posts_1",
+            "name": "study_id",
+            "type": "BIGINT",
+            "length": null,
+            "nullable": false,
+            "isPk": false,
+            "isFk": true,
+            "defaultValue": "",
+            "comment": ""
+          },
+          {
+            "id": "col_posts_2",
+            "name": "author_id",
+            "type": "BIGINT",
+            "length": null,
+            "nullable": false,
+            "isPk": false,
+            "isFk": true,
+            "defaultValue": "",
+            "comment": ""
+          },
+          {
+            "id": "col_posts_3",
+            "name": "title",
+            "type": "VARCHAR",
+            "length": 200,
+            "nullable": false,
+            "isPk": false,
+            "isFk": false,
+            "defaultValue": "",
+            "comment": ""
+          },
+          {
+            "id": "col_posts_4",
+            "name": "content",
+            "type": "TEXT",
+            "length": null,
+            "nullable": false,
+            "isPk": false,
+            "isFk": false,
+            "defaultValue": "",
+            "comment": ""
+          },
+          {
+            "id": "col_posts_5",
+            "name": "notice",
+            "type": "BOOLEAN",
+            "length": null,
+            "nullable": false,
+            "isPk": false,
+            "isFk": false,
+            "defaultValue": "",
+            "comment": ""
+          },
+          {
+            "id": "col_posts_6",
+            "name": "created_at",
+            "type": "DATETIME",
+            "length": null,
+            "nullable": false,
+            "isPk": false,
+            "isFk": false,
+            "defaultValue": "",
+            "comment": ""
+          }
+        ],
+        "layout": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": "tbl_comments",
+        "name": "comments",
+        "entityName": "Comment",
+        "description": "댓글",
+        "columns": [
+          {
+            "id": "col_comments_0",
+            "name": "id",
+            "type": "BIGINT",
+            "length": null,
+            "nullable": false,
+            "isPk": true,
+            "isFk": false,
+            "defaultValue": "",
+            "comment": ""
+          },
+          {
+            "id": "col_comments_1",
+            "name": "post_id",
+            "type": "BIGINT",
+            "length": null,
+            "nullable": false,
+            "isPk": false,
+            "isFk": true,
+            "defaultValue": "",
+            "comment": ""
+          },
+          {
+            "id": "col_comments_2",
+            "name": "author_id",
+            "type": "BIGINT",
+            "length": null,
+            "nullable": false,
+            "isPk": false,
+            "isFk": true,
+            "defaultValue": "",
+            "comment": ""
+          },
+          {
+            "id": "col_comments_3",
+            "name": "content",
+            "type": "VARCHAR",
+            "length": 1000,
+            "nullable": false,
+            "isPk": false,
+            "isFk": false,
+            "defaultValue": "",
+            "comment": ""
+          },
+          {
+            "id": "col_comments_4",
+            "name": "created_at",
+            "type": "DATETIME",
+            "length": null,
+            "nullable": false,
+            "isPk": false,
+            "isFk": false,
+            "defaultValue": "",
+            "comment": ""
+          }
+        ],
+        "layout": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    ],
+    "relations": [
+      {
+        "id": "rel_1",
+        "fromTableId": "tbl_studies",
+        "fromColumnId": "",
+        "toTableId": "tbl_users",
+        "toColumnId": "",
+        "cardinality": "N:1",
+        "onDelete": "CASCADE",
+        "note": "스터디장"
+      },
+      {
+        "id": "rel_2",
+        "fromTableId": "tbl_members",
+        "fromColumnId": "",
+        "toTableId": "tbl_studies",
+        "toColumnId": "",
+        "cardinality": "N:1",
+        "onDelete": "CASCADE",
+        "note": ""
+      },
+      {
+        "id": "rel_3",
+        "fromTableId": "tbl_members",
+        "fromColumnId": "",
+        "toTableId": "tbl_users",
+        "toColumnId": "",
+        "cardinality": "N:1",
+        "onDelete": "CASCADE",
+        "note": ""
+      },
+      {
+        "id": "rel_4",
+        "fromTableId": "tbl_applications",
+        "fromColumnId": "",
+        "toTableId": "tbl_studies",
+        "toColumnId": "",
+        "cardinality": "N:1",
+        "onDelete": "CASCADE",
+        "note": ""
+      },
+      {
+        "id": "rel_5",
+        "fromTableId": "tbl_applications",
+        "fromColumnId": "",
+        "toTableId": "tbl_users",
+        "toColumnId": "",
+        "cardinality": "N:1",
+        "onDelete": "CASCADE",
+        "note": "신청자"
+      },
+      {
+        "id": "rel_6",
+        "fromTableId": "tbl_schedules",
+        "fromColumnId": "",
+        "toTableId": "tbl_studies",
+        "toColumnId": "",
+        "cardinality": "N:1",
+        "onDelete": "CASCADE",
+        "note": ""
+      },
+      {
+        "id": "rel_7",
+        "fromTableId": "tbl_attendances",
+        "fromColumnId": "",
+        "toTableId": "tbl_schedules",
+        "toColumnId": "",
+        "cardinality": "N:1",
+        "onDelete": "CASCADE",
+        "note": ""
+      },
+      {
+        "id": "rel_8",
+        "fromTableId": "tbl_attendances",
+        "fromColumnId": "",
+        "toTableId": "tbl_users",
+        "toColumnId": "",
+        "cardinality": "N:1",
+        "onDelete": "CASCADE",
+        "note": ""
+      },
+      {
+        "id": "rel_9",
+        "fromTableId": "tbl_posts",
+        "fromColumnId": "",
+        "toTableId": "tbl_studies",
+        "toColumnId": "",
+        "cardinality": "N:1",
+        "onDelete": "CASCADE",
+        "note": ""
+      },
+      {
+        "id": "rel_10",
+        "fromTableId": "tbl_posts",
+        "fromColumnId": "",
+        "toTableId": "tbl_users",
+        "toColumnId": "",
+        "cardinality": "N:1",
+        "onDelete": "CASCADE",
+        "note": "작성자"
+      },
+      {
+        "id": "rel_11",
+        "fromTableId": "tbl_comments",
+        "fromColumnId": "",
+        "toTableId": "tbl_posts",
+        "toColumnId": "",
+        "cardinality": "N:1",
+        "onDelete": "CASCADE",
+        "note": ""
+      },
+      {
+        "id": "rel_12",
+        "fromTableId": "tbl_comments",
+        "fromColumnId": "",
+        "toTableId": "tbl_users",
+        "toColumnId": "",
+        "cardinality": "N:1",
+        "onDelete": "CASCADE",
+        "note": "작성자"
+      }
+    ]
+  }
+}

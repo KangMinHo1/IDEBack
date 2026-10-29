@@ -1,0 +1,81 @@
+{
+  "project": {
+    "name": "스터디메이트",
+    "description": "캠퍼스 스터디 모임 매칭 웹 서비스",
+    "type": "팀 프로젝트",
+    "language": "Java",
+    "stack": [
+      "Spring Boot",
+      "React",
+      "MySQL",
+      "JPA",
+      "Docker"
+    ],
+    "progress": 75,
+    "doneScheduleCount": 9,
+    "scheduleTotalCount": 12,
+    "devlogCount": 10
+  },
+  "devlogs": [
+    {
+      "title": "주제 선정과 요구사항 정리",
+      "date": "2026-03-04",
+      "projectName": "스터디메이트",
+      "summary": "팀 회의로 스터디 매칭 서비스를 주제로 정하고 요구사항 10개를 우선순위와 함께 정리했다."
+    },
+    {
+      "title": "ERD 설계",
+      "date": "2026-03-14",
+      "projectName": "스터디메이트",
+      "summary": "users, studies, study_members, applications 등 8개 테이블을 설계했다. 스터디 참여자를 별도 테이블로 분리했다."
+    },
+    {
+      "title": "회원가입/로그인 구현",
+      "date": "2026-03-25",
+      "projectName": "스터디메이트",
+      "summary": "Spring Security와 JWT로 회원가입과 로그인을 구현했다. 리프레시 토큰으로 재발급도 처리했다."
+    },
+    {
+      "title": "스터디 개설과 목록 구현",
+      "date": "2026-04-08",
+      "projectName": "스터디메이트",
+      "summary": "스터디 개설 API와 목록 화면을 만들었다. QueryDSL로 주제와 모집 상태 필터 검색을 구현했다."
+    },
+    {
+      "title": "참가 신청 기능",
+      "date": "2026-04-22",
+      "projectName": "스터디메이트",
+      "summary": "참가 신청과 스터디장의 승인/거절을 구현했다. 정원이 찬 경우 신청을 막는 검증을 추가했다."
+    },
+    {
+      "title": "일정 캘린더",
+      "date": "2026-05-06",
+      "projectName": "스터디메이트",
+      "summary": "FullCalendar로 모임 일정을 보여 주고 일정 등록 API를 연결했다."
+    },
+    {
+      "title": "게시판과 댓글",
+      "date": "2026-05-20",
+      "projectName": "스터디메이트",
+      "summary": "스터디 게시판의 글 작성, 상세 조회, 댓글을 구현했다. 공지 글을 상단에 고정했다."
+    },
+    {
+      "title": "프로필 화면",
+      "date": "2026-06-03",
+      "projectName": "스터디메이트",
+      "summary": "내 정보 조회와 관심 분야 수정 화면을 만들었다."
+    },
+    {
+      "title": "채팅 기능 검토",
+      "date": "2026-06-15",
+      "projectName": "스터디메이트",
+      "summary": "WebSocket 채팅을 시도했지만 일정상 이번 학기에는 구현하지 못하고 다음 단계로 미뤘다."
+    },
+    {
+      "title": "배포 준비",
+      "date": "2026-06-24",
+      "projectName": "스터디메이트",
+      "summary": "Docker Compose로 백엔드와 MySQL을 묶어 배포 환경을 구성했다."
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 package com.myide.backend.service.aireport;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.myide.backend.domain.design.DesignDocSnapshot;
+import com.myide.backend.dto.aireport.FinalReportDraftRequest.DevlogInfo;
 import com.myide.backend.dto.design.v2.ApiSpecV2;
 import com.myide.backend.dto.design.v2.ColumnV2;
 import com.myide.backend.dto.design.v2.DesignMetaV2;
@@ -26,17 +26,18 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 최종 보고서에 들어갈 설계 부분을 확인한다.
+ * 최종 보고서에 들어갈 설계 자료를 확인한다.
  *
- * 화면이 보내 주는 값 대신 저장된 설계를 읽게 바꾼 이유가 여기서 드러나야
- * 한다. 화면 흐름과 설계 점검 결과, 그리고 요구사항이 실제로 구현까지
- * 이어졌는지가 글에 들어 있어야 의미가 있다.
+ * 자료가 명세 원문이면 AI 도 원문을 옮겨 적는다. 그래서 여기서는 무엇이 들어가는지
+ * 만큼 <b>무엇이 빠지는지</b>(요청·응답 JSON, 컬럼 자료형, 경로 나열)도 함께 본다.
  */
 class DesignReportSectionBuilderTest {
 
@@ -63,18 +64,18 @@ class DesignReportSectionBuilderTest {
     @Test
     @DisplayName("저장된 설계가 없으면 예전 경로를 쓰도록 null 을 돌려준다")
     void returnsNullWithoutSnapshot() {
-        Mockito.when(snapshotRepository.findByWorkspace_Uuid(WORKSPACE))
+        Mockito.when(snapshotRepository.findProjectionJsonByWorkspaceUuid(WORKSPACE))
                 .thenReturn(Optional.empty());
 
-        assertThat(builder.build(WORKSPACE)).isNull();
+        assertThat(builder.build(WORKSPACE, List.of())).isNull();
     }
 
     @Test
-    @DisplayName("저장은 있는데 내용이 비었으면 굳이 빈 글을 넣지 않는다")
+    @DisplayName("저장은 됐는데 내용이 비었으면 굳이 빈 글을 넣지 않는다")
     void returnsNullForEmptyDesign() {
         givenSnapshot(codec.toJson(DesignModelV2.empty()));
 
-        assertThat(builder.build(WORKSPACE)).isNull();
+        assertThat(builder.build(WORKSPACE, List.of())).isNull();
     }
 
     @Test
@@ -82,40 +83,83 @@ class DesignReportSectionBuilderTest {
     void survivesBrokenSnapshot() {
         givenSnapshot("{ 이건 JSON 이 아니다");
 
-        assertThat(builder.build(WORKSPACE)).isNull();
+        assertThat(builder.build(WORKSPACE, List.of())).isNull();
     }
 
     @Test
-    @DisplayName("화면 흐름과 점검 결과, 추적성이 함께 들어간다")
-    void includesFlowDoctorAndTrace() {
+    @DisplayName("Yjs 바이너리까지 읽는 엔티티 조회를 쓰지 않는다")
+    void readsProjectionOnly() {
         givenSnapshot(codec.toJson(sample()));
 
-        String text = builder.build(WORKSPACE);
+        builder.build(WORKSPACE, List.of());
 
-        assertThat(text).isNotNull();
-
-        // 예전에는 화면이 보내는 값에 화면 흐름 자체가 없었다.
-        assertThat(text).contains("[화면 흐름]");
-        assertThat(text).contains("로그인 화면 (/login)");
-        assertThat(text).contains("[시작 화면]");
-        assertThat(text).contains("이동: 로그인 버튼 클릭 → 글 상세");
-
-        assertThat(text).contains("[설계 점검 결과]");
-        assertThat(text).contains("[추적성");
-
-        // 근거와 연결이 보고서에 드러나야 한다.
-        assertThat(text).contains("근거 요구사항: R-01 로그인");
-        assertThat(text).contains("쓰는 표: users");
-        assertThat(text).contains("id BIGINT [PK]");
+        Mockito.verify(snapshotRepository, Mockito.never()).findByWorkspace_Uuid(Mockito.anyString());
     }
 
     @Test
-    @DisplayName("사슬이 끊긴 요구사항은 어디서 끊겼는지 이름과 함께 적는다")
+    @DisplayName("기능 단위로 묶고 화면 흐름·점검 결과·구현 근거를 함께 넣는다")
+    void groupsByFeature() {
+        givenSnapshot(codec.toJson(sample()));
+
+        String text = builder.build(WORKSPACE, List.of()).text();
+
+        assertThat(text).contains("[기능별 정리]");
+        assertThat(text).contains("■ 회원");
+        assertThat(text).contains("- R-01 로그인 [필수]");
+        assertThat(text).contains("API 역할: 로그인한다");
+        assertThat(text).contains("사용 데이터: users");
+
+        assertThat(text).contains("[핵심 사용자 흐름]");
+        assertThat(text).contains("로그인 화면 →(로그인 버튼 클릭) 글 상세");
+
+        assertThat(text).contains("[설계 점검 결과]");
+        assertThat(text).contains("[구현 근거 요약]");
+    }
+
+    @Test
+    @DisplayName("요청·응답 JSON 과 컬럼 자료형은 넘기지 않는다")
+    void dropsSpecDetails() {
+        givenSnapshot(codec.toJson(sample()));
+
+        String text = builder.build(WORKSPACE, List.of()).text();
+
+        assertThat(text).doesNotContain("\"email\"");
+        assertThat(text).doesNotContain("accessToken");
+        assertThat(text).doesNotContain("BIGINT");
+        assertThat(text).doesNotContain("VARCHAR");
+        assertThat(text).doesNotContain("/api/users/login");
+
+        // 업무 의미가 있는 컬럼은 이름과 설명만 남는다.
+        assertThat(text).contains("email(로그인 이메일)");
+    }
+
+    @Test
+    @DisplayName("설계가 이어져 있어도 개발일지 기록이 없으면 구현으로 보지 않는다")
+    void separatesDesignFromImplementation() {
+        givenSnapshot(codec.toJson(sample()));
+
+        DesignReportSectionBuilder.DesignBrief brief = builder.build(WORKSPACE, List.of());
+
+        assertThat(brief.text()).contains("설계 연결: 화면·API·테이블까지 연결됨");
+        assertThat(brief.text()).contains("구현 근거: 개발일지에 기록 없음 — 구현 여부 확인 필요");
+        assertThat(brief.text()).doesNotContain("미구현");
+        assertThat(brief.features()).singleElement()
+                .extracting(ReportFeature::evidence).isEqualTo(ReportFeature.Evidence.NONE);
+
+        DesignReportSectionBuilder.DesignBrief withLog = builder.build(WORKSPACE,
+                List.of(devlog("2026-04-01", "로그인 구현", "JWT 로 로그인을 만들었다.")));
+
+        assertThat(withLog.text()).contains("개발일지에 구현 기록 있음 (2026-04-01 「로그인 구현」)");
+        assertThat(withLog.features()).singleElement()
+                .extracting(ReportFeature::evidence).isEqualTo(ReportFeature.Evidence.RECORDED);
+    }
+
+    @Test
+    @DisplayName("사슬이 끊긴 요구사항은 어디서 끊겼는지 적는다")
     void reportsBrokenTrace() {
         DesignModelV2 model = sample();
 
-        // 화면도 API도 없는 요구사항을 하나 더한다.
-        List<RequirementV2> requirements = new java.util.ArrayList<>(model.requirements());
+        List<RequirementV2> requirements = new ArrayList<>(model.requirements());
         requirements.add(new RequirementV2("req_9", "R-09", "알림", "알림 받기",
                 "새 글이 올라오면 알린다", "should", List.of(), List.of()));
 
@@ -123,19 +167,39 @@ class DesignReportSectionBuilderTest {
                 requirements, model.screens(), model.screenTransitions(), model.apis(),
                 model.erd())));
 
-        String text = builder.build(WORKSPACE);
+        String text = builder.build(WORKSPACE, List.of()).text();
 
-        assertThat(text).contains("R-09 알림 받기");
-        assertThat(text).contains("담당 화면 없음");
-        assertThat(text).contains("담당 API 없음");
-        assertThat(text).contains("요구사항 2개 중 1개가 화면·API·표까지 모두 이어져 있습니다.");
+        assertThat(text).contains("- R-09 알림 받기 [권장]");
+        assertThat(text).contains("설계 연결: 담당 화면 없음, 담당 API 없음");
+        assertThat(text).contains("이 중 1개가 설계상 화면·API·테이블까지 연결됨");
+    }
+
+    @Test
+    @DisplayName("대표 프로젝트 자료가 예전보다 짧아진다")
+    void representativeBriefIsCompact() throws Exception {
+        String projection = new String(getClass()
+                .getResourceAsStream("/aireport/bench-projection.json").readAllBytes(), StandardCharsets.UTF_8);
+        givenSnapshot(projection);
+
+        String text = builder.build(WORKSPACE, List.of()).text();
+
+        // 예전 방식의 설계 부분은 같은 자료로 8,366자였다(요청·응답 JSON, 컬럼 자료형 포함).
+        assertThat(text.length()).isLessThan(5000);
+        assertThat(text).contains("스터디 목록 →");
+        assertThat(text).contains("요구사항과 연결되지 않은 API: 스터디 수정(로그인 필요), 스터디 삭제(로그인 필요)");
     }
 
     private void givenSnapshot(String projectionJson) {
-        DesignDocSnapshot snapshot = Mockito.mock(DesignDocSnapshot.class);
-        Mockito.when(snapshot.getProjectionJson()).thenReturn(projectionJson);
-        Mockito.when(snapshotRepository.findByWorkspace_Uuid(WORKSPACE))
-                .thenReturn(Optional.of(snapshot));
+        Mockito.when(snapshotRepository.findProjectionJsonByWorkspaceUuid(WORKSPACE))
+                .thenReturn(Optional.of(projectionJson));
+    }
+
+    static DevlogInfo devlog(String date, String title, String summary) {
+        DevlogInfo devlog = new DevlogInfo();
+        devlog.setDate(date);
+        devlog.setTitle(title);
+        devlog.setSummary(summary);
+        return devlog;
     }
 
     private DesignModelV2 sample() {
@@ -161,7 +225,7 @@ class DesignReportSectionBuilderTest {
                 "scr_detail", "로그인 버튼 클릭", "submit", "", List.of());
 
         ApiSpecV2 loginApi = new ApiSpecV2("api_login", "POST", "/api/users/login",
-                "로그인한다", "", "", false, "R",
+                "로그인한다", "{\"email\":\"a@b.c\"}", "{\"accessToken\":\"x\"}", false, "R",
                 List.of("req_1"), List.of("scr_login"), List.of("tbl_user"));
 
         return new DesignModelV2(2, DesignMetaV2.empty(),
