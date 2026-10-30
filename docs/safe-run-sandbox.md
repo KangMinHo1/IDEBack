@@ -466,7 +466,7 @@ function applyMerged(doc, yText, before, merged) {
 | `ide.safe-run-root` (`IDE_SAFE_RUN_ROOT`) | `C:\WebIDE\safe-run` | green · sandbox · runs 폴더의 루트. **운영(Linux)에서는 반드시 지정** |
 | `ide.safe-run.max-builds.console` | `3` | Java 콘솔의 실행 1회당 최대 빌드 횟수 |
 | `ide.safe-run.max-builds.spring-boot` | `3` | Spring Boot 의 최대 빌드 횟수. `2` 로 낮추면 빌드 1 → 빌드 3 만 한다 |
-| `ide.safe-run.spring-boot-concurrency` (`IDE_SAFE_RUN_SPRING_BOOT_CONCURRENCY`) | `1` | 서버 전체에서 동시에 도는 Spring Boot 안전 실행의 수. 넘치면 대기열에서 기다린다 |
+| `ide.safe-run.spring-boot-concurrency` (`IDE_SAFE_RUN_SPRING_BOOT_CONCURRENCY`) | `3` | 서버 전체에서 동시에 도는 Spring Boot 안전 실행의 수. 넘치면 대기열에서 기다린다 |
 | `ide.safe-run.build-timeout-seconds` | `600` | 빌드 한 번을 기다리는 최대 시간 |
 | `collab.auth.enabled` | `true` | 끄면 작성자 구분이 동작하지 않는다(기동 시 경고). `sbx` 방은 꺼도 본인 확인을 한다 |
 

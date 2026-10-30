@@ -28,6 +28,7 @@ import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
@@ -93,10 +94,10 @@ public class RunService {
     private long buildTimeoutSeconds;
 
     /*
-     * 서버 전체에서 동시에 돌 수 있는 Spring Boot 안전 실행의 수. 운영 서버가 2GB 라서
-     * 두 개가 겹치면 메모리가 모자란다. 서버를 키우면 이 값을 올린다.
+     * 서버 전체에서 동시에 돌 수 있는 Spring Boot 안전 실행의 수. 하나가 700MB 넘게 쓴다.
+     * 운영 서버를 4GB 로 늘려 3 으로 올렸다. 메모리 부족으로 서버가 죽으면 이 값을 내린다.
      */
-    @Value("${ide.safe-run.spring-boot-concurrency:1}")
+    @Value("${ide.safe-run.spring-boot-concurrency:3}")
     private int springBootConcurrency;
 
     private RunQueue springBootQueue;
@@ -156,7 +157,7 @@ public class RunService {
      */
     private void runQueued(WebSocketSession session, Request request, AtomicBoolean cancelled) throws Exception {
         if (request.templateType() != TemplateType.SPRING_BOOT) {
-            run(session, request, cancelled);
+            run(session, request, cancelled, () -> {});
             return;
         }
 
@@ -169,14 +170,25 @@ public class RunService {
             return;
         }
 
+        // 끝을 알리기 전에 자리를 먼저 돌려준다. 화면은 끝 알림을 받자마자 Run 을 다시 켜므로,
+        // 정리를 다 마친 뒤에 돌려주면 바로 다시 누른 사람이 자기 이전 실행을 기다리게 된다.
+        // 두 번 돌려주면 자리가 늘어나므로 한 번만 돌려준다.
+        AtomicBoolean released = new AtomicBoolean(false);
+        Runnable releaseSlot = () -> {
+            if (released.compareAndSet(false, true)) {
+                springBootQueue.release();
+            }
+        };
+
         try {
-            run(session, request, cancelled);
+            run(session, request, cancelled, releaseSlot);
         } finally {
-            springBootQueue.release();
+            releaseSlot.run();
         }
     }
 
-    private void run(WebSocketSession session, Request request, AtomicBoolean cancelled) throws Exception {
+    private void run(WebSocketSession session, Request request, AtomicBoolean cancelled, Runnable releaseSlot)
+            throws Exception {
         BranchKey key = request.key();
         boolean isSpringBoot = request.templateType() == TemplateType.SPRING_BOOT;
 
@@ -267,7 +279,9 @@ public class RunService {
                     // 컨테이너에 다 들어갔으니 임시 폴더는 프로그램이 도는 동안 붙들고 있을 이유가 없다.
                     deleteAll(tempDirs);
 
-                    runProgram(session, bench, commands, desktopUi && startDesktop(session, bench), windowClass);
+                    runProgram(session, bench, commands, desktopUi && startDesktop(session, bench), windowClass,
+                            cancelled);
+                    releaseSlot.run();
                     finish(session);
                     return;
                 }
@@ -286,6 +300,7 @@ public class RunService {
                     }
 
                     announceFailure(session, request, planner, attempt, build.output(), errorFiles);
+                    releaseSlot.run();
                     finish(session);
                     return;
                 }
@@ -377,7 +392,7 @@ public class RunService {
 
     /** 컴파일이 성공했다. 같은 컨테이너에서 프로그램을 실행하고 끝날 때까지 기다린다. */
     private void runProgram(WebSocketSession session, DockerService.Workbench bench, RunCommands.Commands commands,
-                            boolean desktopUi, String windowClass)
+                            boolean desktopUi, String windowClass, AtomicBoolean cancelled)
             throws IOException, InterruptedException {
 
         CountDownLatch ended = new CountDownLatch(1);
@@ -416,7 +431,12 @@ public class RunService {
 
         // 프로그램이 스스로 끝나거나, 사용자가 중지해 컨테이너가 사라질 때까지.
         // Spring Boot 는 여기서 기다리는 동안 대기열의 자리를 쥐고 있다.
-        ended.await();
+        // Docker 의 종료 알림만 믿으면 그 알림이 빠졌을 때 자리가 영영 안 풀린다. 중지(또는 창 닫기)도 함께 본다.
+        while (!ended.await(1, TimeUnit.SECONDS)) {
+            if (cancelled.get()) {
+                return;
+            }
+        }
     }
 
     /**
