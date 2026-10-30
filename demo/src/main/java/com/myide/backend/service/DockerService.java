@@ -2,8 +2,10 @@ package com.myide.backend.service;
 
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.async.ResultCallback;
+import com.github.dockerjava.api.command.CreateContainerCmd;
 import com.github.dockerjava.api.command.CreateContainerResponse;
 import com.github.dockerjava.api.command.InspectContainerResponse;
+import com.github.dockerjava.api.model.Container;
 import com.github.dockerjava.api.model.ExposedPort;
 import com.github.dockerjava.api.model.Frame;
 import com.github.dockerjava.api.model.HostConfig;
@@ -26,7 +28,6 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -46,16 +47,42 @@ public class DockerService {
     private final Map<String, String> terminalContainerMap = new ConcurrentHashMap<>();
     private final Map<String, PipedOutputStream> terminalInputMap = new ConcurrentHashMap<>();
 
+    private static final String IMAGE = "ide-execution-env";
+
+    /** 이 서버가 만든 컨테이너 표시. 이미지를 다시 빌드하면 옛 컨테이너의 이미지 이름이 해시로 바뀌어 이름만으로는 못 찾는다. */
+    private static final String OWNER_LABEL = "myide.managed";
+
+    private CreateContainerCmd newContainer() {
+        return dockerClient.createContainerCmd(IMAGE).withLabels(Map.of(OWNER_LABEL, "true"));
+    }
+
+    /**
+     * 서버가 꺼지면 세션→컨테이너 맵이 사라져 돌던 컨테이너를 아무도 치우지 않는다.
+     * 그래서 시작할 때 이 서버가 만든 컨테이너를 전부 지운다.
+     * (getNames() 는 "/happy_turing" 같은 컨테이너 이름이라 이미지 이름으로 거르면 안 된다.)
+     */
     @PostConstruct
     public void cleanUpZombieContainers() {
         log.info("🧹 서버 시작: 남아있는 낡은 IDE 컨테이너들을 청소합니다...");
         try {
             dockerClient.listContainersCmd().withShowAll(true).exec().stream()
-                    .filter(c -> Arrays.toString(c.getNames()).contains("ide-execution-env"))
-                    .forEach(c -> dockerClient.removeContainerCmd(c.getId()).withForce(true).exec());
+                    .filter(DockerService::isIdeContainer)
+                    .forEach(c -> {
+                        try {
+                            dockerClient.removeContainerCmd(c.getId()).withForce(true).exec();
+                        } catch (Exception e) {
+                            log.warn("컨테이너 청소 실패 ({}): {}", c.getId(), e.getMessage());
+                        }
+                    });
         } catch (Exception e) {
             log.warn("초기 컨테이너 청소 실패", e);
         }
+    }
+
+    static boolean isIdeContainer(Container c) {
+        String image = c.getImage() == null ? "" : c.getImage();
+        boolean labeled = c.getLabels() != null && "true".equals(c.getLabels().get(OWNER_LABEL));
+        return labeled || image.equals(IMAGE) || image.startsWith(IMAGE + ":");
     }
 
     private String calculateHostPath(String workspaceId, String projectName, String branchName) {
@@ -107,7 +134,7 @@ public class DockerService {
             String hostPath = calculateHostPath(workspaceId, projectName, branchName);
             log.info("🚀 도커 실행: 브랜치={}, (Cmd: {}, 내부 포트: {}, 매핑 포트: {})", branchName, finalCmd, internalPort, finalHostPort);
 
-            var createCmd = dockerClient.createContainerCmd("ide-execution-env")
+            var createCmd = newContainer()
                     .withWorkingDir("/app")
                     .withTty(false).withStdinOpen(true)
                     .withEnv("PYTHONUNBUFFERED=1");
@@ -162,9 +189,10 @@ public class DockerService {
 
                     dockerClient.startContainerCmd(containerId).exec();
 
-                    if (templateType == TemplateType.CONSOLE) {
-                        dockerClient.waitContainerCmd(containerId).exec(new WaitContainerResultCallback()).awaitCompletion();
+                    // 서버형도 프로그램이 스스로 꺼질 때까지 기다렸다가 아래 finally 에서 컨테이너를 지운다.
+                    dockerClient.waitContainerCmd(containerId).exec(new WaitContainerResultCallback()).awaitCompletion();
 
+                    if (templateType == TemplateType.CONSOLE) {
                         if (session.isOpen()) {
                             session.sendMessage(new TextMessage("\n--- Execution Finished ---\n"));
                             try { Thread.sleep(100); } catch (InterruptedException ignored) {}
@@ -174,14 +202,15 @@ public class DockerService {
 
                 } catch (Exception e) {
                     String msg = e.getMessage() != null ? e.getMessage() : "";
-                    if (!msg.contains("Pipe closed") && !msg.contains("Stream closed") && !msg.contains("파이프가 끝났습니다") && !msg.contains("Container died")) {
+                    // 맵에 이 컨테이너가 없으면 사용자가 중지했거나 새 실행으로 바뀐 것이라 오류가 아니다.
+                    boolean stillOurs = containerId.equals(runningContainerMap.get(sessionId));
+                    if (stillOurs && !msg.contains("Pipe closed") && !msg.contains("Stream closed") && !msg.contains("파이프가 끝났습니다") && !msg.contains("Container died")) {
                         log.error("Execution Error", e);
                         try { if (session.isOpen()) session.sendMessage(new TextMessage("\n[Error] " + msg)); } catch (IOException ex) {}
                     }
                 } finally {
-                    if (templateType == TemplateType.CONSOLE) {
-                        stopContainer(sessionId);
-                    }
+                    // 세션 ID 로 지우면 같은 세션의 새 실행 컨테이너를 죽일 수 있어 이 컨테이너만 지운다.
+                    closeWorkbench(sessionId, containerId);
                 }
             }).start();
 
@@ -235,7 +264,7 @@ public class DockerService {
         int hostPort = internalPort > 0 ? findFreePort() : 0;
         int guiHostPort = openGuiPort ? findFreePort() : 0;
 
-        var createCmd = dockerClient.createContainerCmd("ide-execution-env")
+        var createCmd = newContainer()
                 .withWorkingDir("/app")
                 .withTty(false)
                 .withEnv("PYTHONUNBUFFERED=1");
@@ -365,7 +394,7 @@ public class DockerService {
     }
 
     /**
-     * 안전 실행이 띄운 컨테이너를 치운다. 실행이 끝나든 실패하든 반드시 부른다.
+     * 안전 실행·옛 실행이 띄운 컨테이너를 치운다. 실행이 끝나든 실패하든 반드시 부른다.
      *
      * 세션에 지금 묶여 있는 것이 이 컨테이너일 때만 맵에서 뺀다. 같은 세션으로 새
      * 실행이 이미 시작됐다면 맵에는 새 컨테이너가 올라와 있다. 세션 ID 만 보고 지우면
@@ -408,7 +437,7 @@ public class DockerService {
         log.info("🐛 디버그 실행: {} (Path: {})", finalDebugCmd, hostPath);
 
         try {
-            CreateContainerResponse container = dockerClient.createContainerCmd("ide-execution-env")
+            CreateContainerResponse container = newContainer()
                     .withWorkingDir("/app")
                     .withExposedPorts(tcp5005)
                     .withHostConfig(new HostConfig().withPortBindings(portBindings))
@@ -449,7 +478,7 @@ public class DockerService {
 
         log.info("💻 터미널 생성: {} (Path: {})", projectName, hostPath);
 
-        CreateContainerResponse container = dockerClient.createContainerCmd("ide-execution-env")
+        CreateContainerResponse container = newContainer()
                 .withTty(true).withStdinOpen(true)
                 .withWorkingDir("/app")
                 .withCmd("/bin/bash")
@@ -604,7 +633,7 @@ public class DockerService {
         String containerId = null;
         try {
             log.info("🔨 Building... Command: {}", cmd);
-            CreateContainerResponse container = dockerClient.createContainerCmd("ide-execution-env").withWorkingDir("/app").withCmd("sh", "-c", cmd).exec();
+            CreateContainerResponse container = newContainer().withWorkingDir("/app").withCmd("sh", "-c", cmd).exec();
             containerId = container.getId();
 
             dockerClient.copyArchiveToContainerCmd(containerId).withHostResource(hostWorkspacePath.toString() + "/.").withRemotePath("/app").exec();
@@ -647,7 +676,7 @@ public class DockerService {
 
             log.info("🐍 파이썬 디버그 컨테이너 생성: {}", finalCmd);
 
-            CreateContainerResponse container = dockerClient.createContainerCmd("ide-execution-env")
+            CreateContainerResponse container = newContainer()
                     .withWorkingDir("/app")
                     .withTty(false).withStdinOpen(true)
                     .withCmd("sh", "-c", finalCmd)
@@ -704,7 +733,7 @@ public class DockerService {
             String hostPath = calculateHostPath(workspaceId, projectName, branchName);
             log.info("💻 만능 CLI 디버거 실행: {}", debugCmd);
 
-            CreateContainerResponse container = dockerClient.createContainerCmd("ide-execution-env")
+            CreateContainerResponse container = newContainer()
                     .withWorkingDir("/app")
                     .withTty(false).withStdinOpen(true)
                     .withCmd("sh", "-c", debugCmd)
