@@ -12,7 +12,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.web.socket.PingMessage;
 import org.springframework.web.socket.TextMessage;
+import org.springframework.web.socket.WebSocketMessage;
 import org.springframework.web.socket.WebSocketSession;
 
 import jakarta.annotation.PostConstruct;
@@ -28,6 +30,9 @@ import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
@@ -105,6 +110,19 @@ public class RunService {
     /** 세션별 "중지됨" 깃발. 사용자가 중지를 누르면 다음 시도로 넘어가지 않게 한다. */
     private final Map<String, AtomicBoolean> activeRuns = new ConcurrentHashMap<>();
 
+    /*
+     * 실행 연결에 주기적으로 핑을 보낸다. 운영 환경에서는 오가는 메시지가 없는 웹소켓이 1분 안쪽에
+     * 끊겼다(측정: 45~90초, 1006). Spring Boot + Swing 은 앱이 뜬 뒤 출력이 거의 없어 그대로 끊겼고,
+     * 서버는 그걸 몰라 앱이 실행 자리를 쥔 채 남았다. 브라우저는 핑에 자동으로 답하므로 프론트는 손댈 게 없다.
+     */
+    private static final long KEEP_ALIVE_SECONDS = 15;
+
+    private final ScheduledExecutorService keepAlive = Executors.newSingleThreadScheduledExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "safe-run-keepalive");
+        thread.setDaemon(true);
+        return thread;
+    });
+
     @PostConstruct
     public void init() {
         springBootQueue = new RunQueue(springBootConcurrency);
@@ -127,6 +145,9 @@ public class RunService {
         }
 
         Thread worker = new Thread(() -> {
+            ScheduledFuture<?> ping = keepAlive.scheduleAtFixedRate(
+                    () -> deliver(session, new PingMessage()), KEEP_ALIVE_SECONDS, KEEP_ALIVE_SECONDS, TimeUnit.SECONDS);
+
             try {
                 runQueued(session, request, cancelled);
             } catch (Exception e) {
@@ -134,6 +155,7 @@ public class RunService {
                 send(session, "\n[Error] 안전 실행 중 오류가 발생했습니다. " + e.getMessage() + "\n");
                 finish(session);
             } finally {
+                ping.cancel(false);
                 activeRuns.remove(session.getId(), cancelled);
             }
         }, "safe-run-" + session.getId());
@@ -432,8 +454,15 @@ public class RunService {
         // 프로그램이 스스로 끝나거나, 사용자가 중지해 컨테이너가 사라질 때까지.
         // Spring Boot 는 여기서 기다리는 동안 대기열의 자리를 쥐고 있다.
         // Docker 의 종료 알림만 믿으면 그 알림이 빠졌을 때 자리가 영영 안 풀린다. 중지(또는 창 닫기)도 함께 본다.
+        // 연결이 망가지면 닫힘 알림(afterConnectionClosed)이 오지 않을 때가 있다. 그러면 아무도 못 끄는
+        // 앱이 자리를 쥔 채 남으므로(운영에서 16분 남은 적이 있다) 연결이 살아 있는지도 직접 본다.
         while (!ended.await(1, TimeUnit.SECONDS)) {
             if (cancelled.get()) {
+                return;
+            }
+
+            if (!session.isOpen()) {
+                log.warn("⚠️ [SafeRun] 실행 연결이 끊겨 앱을 정리합니다: session={}", session.getId());
                 return;
             }
         }
@@ -585,21 +614,33 @@ public class RunService {
         try {
             Thread.sleep(100);
 
-            if (session.isOpen()) {
-                session.close();
+            // 닫기도 소켓에 쓰는 일이다. 출력·핑과 겹치면 연결이 TEXT_PARTIAL_WRITING 으로 망가진다.
+            synchronized (session) {
+                if (session.isOpen()) {
+                    session.close();
+                }
             }
         } catch (Exception ignored) {
         }
     }
 
-    /** 출력 스레드와 실행 흐름 스레드가 같은 소켓에 쓰므로 한 번에 하나씩만 보낸다. */
     private void send(WebSocketSession session, String text) {
+        deliver(session, new TextMessage(text));
+    }
+
+    /** 출력 스레드·실행 흐름 스레드·핑 스레드가 같은 소켓에 쓰므로 한 번에 하나씩만 보낸다. */
+    private void deliver(WebSocketSession session, WebSocketMessage<?> message) {
         synchronized (session) {
             try {
                 if (session.isOpen()) {
-                    session.sendMessage(new TextMessage(text));
+                    session.sendMessage(message);
                 }
-            } catch (IOException ignored) {
+            } catch (IOException | IllegalStateException e) {
+                // 보내다 실패한 연결은 다시 못 쓴다. 이 실행을 중지로 보고 정리하게 한다.
+                // (IllegalStateException 은 닫힌 연결에 보낼 때 난다. 안 잡으면 정리 도중 스레드가 죽는다.)
+                log.warn("⚠️ [SafeRun] 실행 출력 전송 실패, 실행을 정리합니다: session={} ({})",
+                        session.getId(), e.getMessage());
+                cancel(session.getId());
             }
         }
     }

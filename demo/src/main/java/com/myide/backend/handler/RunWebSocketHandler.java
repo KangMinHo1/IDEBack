@@ -42,6 +42,7 @@ public class RunWebSocketHandler extends TextWebSocketHandler {
 
         // 컨테이너 종료 요청
         if ("STOP".equals(type)) {
+            log.info("⏹️ [Run] 중지 요청: session={}", session.getId());
             // 안전 실행이 다음 빌드로 넘어가지 않게 먼저 알린다.
             runService.cancel(session.getId());
             dockerService.stopContainer(session.getId());
@@ -146,6 +147,7 @@ public class RunWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) throws Exception {
+        log.info("👋 [Run] 실행 연결 종료: session={}, status={}", session.getId(), status);
         runService.cancel(session.getId());
         dockerService.stopContainer(session.getId());
     }

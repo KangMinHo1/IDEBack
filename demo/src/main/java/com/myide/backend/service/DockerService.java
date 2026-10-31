@@ -520,6 +520,7 @@ public class DockerService {
 
     public void stopContainer(String sessionId) {
         String containerId = runningContainerMap.remove(sessionId);
+        log.info("🧹 실행 컨테이너 중지: session={}, container={}", sessionId, containerId == null ? "(없음)" : containerId);
 
         if (containerId != null) {
             try {
