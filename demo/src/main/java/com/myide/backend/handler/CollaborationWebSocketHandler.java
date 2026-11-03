@@ -13,7 +13,9 @@ import org.springframework.web.socket.BinaryMessage;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.BinaryWebSocketHandler;
+import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorator;
 
+import java.io.IOException;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
@@ -27,6 +29,13 @@ import java.util.concurrent.CopyOnWriteArraySet;
 public class CollaborationWebSocketHandler extends BinaryWebSocketHandler {
 
     private final Map<String, Set<WebSocketSession>> rooms = new ConcurrentHashMap<>();
+
+    /*
+     * 한 사람에게 보낼 줄의 한도. 큰 붙여 넣기는 메시지 하나가 최대 MAX_MESSAGE_BYTES(1MB)라 그 몇 배로 잡는다.
+     * 넘으면 그 사람의 연결만 끊기고, 재접속하면서 놓친 내용을 다시 받는다.
+     */
+    private static final int SEND_TIME_LIMIT_MS = 30_000;
+    private static final int SEND_BUFFER_LIMIT_BYTES = 8 * WebSocketConfig.MAX_MESSAGE_BYTES;
 
     /**
      * 방마다 보관하는 문서 상태. base64 로 인코딩된 Yjs 업데이트다.
@@ -66,7 +75,11 @@ public class CollaborationWebSocketHandler extends BinaryWebSocketHandler {
         session.setTextMessageSizeLimit(WebSocketConfig.MAX_MESSAGE_BYTES);
 
         String room = getRoomName(session);
-        rooms.computeIfAbsent(room, k -> new CopyOnWriteArraySet<>()).add(session);
+        // 한 연결에는 한 번에 하나만 보낼 수 있다. 두 사람이 동시에 치면 서로 다른 스레드가 같은 사람에게
+        // 동시에 보내다 BINARY_PARTIAL_WRITING 으로 메시지 하나가 버려졌고, Yjs 는 빠진 조각 뒤의 편집을
+        // 붙이지 못해 그때부터 한쪽 방향 반영이 멈췄다. 데코레이터가 보낼 것을 줄 세워 하나씩 보낸다.
+        rooms.computeIfAbsent(room, k -> new CopyOnWriteArraySet<>())
+                .add(new ConcurrentWebSocketSessionDecorator(session, SEND_TIME_LIMIT_MS, SEND_BUFFER_LIMIT_BYTES));
         log.info("🤝 [Collab] 동시 편집 접속: 세션 ID = {}, 방 = {}", session.getId(), room);
     }
 
@@ -104,7 +117,12 @@ public class CollaborationWebSocketHandler extends BinaryWebSocketHandler {
         if (roomSessions != null) {
             for (WebSocketSession s : roomSessions) {
                 if (s.isOpen() && (echoToSender || !s.getId().equals(session.getId()))) {
-                    s.sendMessage(message);
+                    // 한 사람에게 실패해도 나머지에게는 보낸다. 예외를 밖으로 던지면 보낸 사람의 연결까지 끊긴다.
+                    try {
+                        s.sendMessage(message);
+                    } catch (IOException | IllegalStateException e) {
+                        log.warn("⚠️ [Collab] 중계 실패: 받는 세션 = {}, 방 = {}, 이유 = {}", s.getId(), room, e.getMessage());
+                    }
                 }
             }
         }
@@ -153,7 +171,8 @@ public class CollaborationWebSocketHandler extends BinaryWebSocketHandler {
         String room = getRoomName(session);
         Set<WebSocketSession> roomSessions = rooms.get(room);
         if (roomSessions != null) {
-            roomSessions.remove(session);
+            // 방에는 데코레이터가 들어 있어 원본 세션으로는 지워지지 않는다. id 로 찾는다.
+            roomSessions.removeIf(s -> s.getId().equals(session.getId()));
             if (roomSessions.isEmpty()) {
                 rooms.remove(room);
 
