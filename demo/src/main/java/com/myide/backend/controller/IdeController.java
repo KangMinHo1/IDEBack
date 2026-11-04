@@ -89,6 +89,11 @@ public class IdeController {
         // 파일 생성 후 같은 workspace/project/branch 방에 접속 중인 사용자들에게 알림
         workspaceEventWebSocketHandler.broadcastFileTreeChanged(request, "CREATE");
 
+        // 새로 만든 파일에 남은 동시편집 문서는 전부 지워진 옛 파일의 것이다. 삭제 때도
+        // 버리지만, 지운 직후 닫히는 탭의 마지막 저장(PUT /doc/snapshot)이 삭제보다 늦게
+        // 도착하면 옛 문서가 다시 올라가, 같은 이름으로 만든 파일이 옛 내용으로 열렸다.
+        collaborationHandler.dropDocsUnder(roomOf(request));
+
         authorStatusService.recordEdit(branchKeyOf(request), request.getFilePath(), userId);
 
         return ResponseEntity.ok("생성됨");
