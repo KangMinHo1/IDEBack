@@ -3,16 +3,31 @@ package com.myide.backend.service.apitest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.myide.backend.dto.apitest.ProxyRequest;
 import com.myide.backend.dto.apitest.ProxyResponse;
+import org.apache.hc.client5.http.DnsResolver;
+import org.apache.hc.client5.http.SystemDefaultDnsResolver;
+import org.apache.hc.client5.http.config.ConnectionConfig;
+import org.apache.hc.client5.http.config.RequestConfig;
+import org.apache.hc.client5.http.impl.DefaultHttpRequestRetryStrategy;
+import org.apache.hc.client5.http.impl.DefaultRedirectStrategy;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
+import org.apache.hc.core5.http.HttpException;
+import org.apache.hc.core5.http.ProtocolException;
+import org.apache.hc.core5.http.protocol.HttpContext;
+import org.apache.hc.core5.util.TimeValue;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.*;
-import org.springframework.http.client.JdkClientHttpRequestFactory;
+import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestTemplate;
 
-import java.net.http.HttpClient;
+import java.net.InetAddress;
+import java.net.URI;
+import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
@@ -30,13 +45,92 @@ public class ProxyService {
     public ProxyService(ObjectMapper om) {
         this.om = om;
 
-        HttpClient httpClient = HttpClient.newBuilder()
-                .followRedirects(HttpClient.Redirect.NORMAL)
-                .build();
-
         this.restTemplate =
-                new RestTemplate(new JdkClientHttpRequestFactory(httpClient));
+                new RestTemplate(new HttpComponentsClientHttpRequestFactory(createGuardedHttpClient()));
     }
+
+    /**
+     * SSRF 검사를 연결 단계에 붙인 HTTP 클라이언트.
+     *
+     * 예전 JDK HttpClient 는 처음 URL 만 SsrfGuard 로 보고 리다이렉트는 검사 없이 따라갔다. 그래서 허용된 서버가
+     * 169.254.169.254(EC2 메타데이터) 같은 곳으로 보내면 그대로 붙었다. 또 검사할 때와 연결할 때 DNS 를 따로
+     * 물어, 그 사이 응답을 바꾸면(DNS rebinding) 검사를 피할 수 있었다.
+     *
+     * - 연결할 주소는 GUARDED_DNS_RESOLVER 로만 받는다. 리다이렉트 대상도 새로 연결하므로 여기를 다시 지난다.
+     * - 리다이렉트는 이동할 URL 도 SsrfGuard 로 본 뒤에만 따라간다(최대 5번).
+     * - 쿠키·압축 해제는 끈다. 예전 클라이언트에 없던 동작이고, 쿠키는 사용자끼리 섞인다.
+     */
+    static CloseableHttpClient createGuardedHttpClient() {
+        return HttpClients.custom()
+                .setConnectionManager(PoolingHttpClientConnectionManagerBuilder.create()
+                        .setDnsResolver(GUARDED_DNS_RESOLVER)
+                        // 사용자가 넣은 아무 서버나 부르므로, 응답 뒤 연결을 말없이 닫는 서버도 있다.
+                        // 다시 쓰기 전에 닫혔는지 보고, 닫혔으면 새로 연결한다(새 연결도 DnsResolver 를 지난다).
+                        .setDefaultConnectionConfig(ConnectionConfig.custom()
+                                .setValidateAfterInactivity(TimeValue.ZERO_MILLISECONDS)
+                                .build())
+                        .setMaxConnTotal(100)
+                        .setMaxConnPerRoute(20)
+                        .build())
+                .setRedirectStrategy(GUARDED_REDIRECT_STRATEGY)
+                .setDefaultRequestConfig(RequestConfig.custom()
+                        .setRedirectsEnabled(true)
+                        .setMaxRedirects(5)
+                        .build())
+                .setRetryStrategy(CONNECTION_ONLY_RETRY_STRATEGY)
+                .disableCookieManagement()
+                .disableContentCompression()
+                .build();
+    }
+
+    // 끊긴 연결(keep-alive 로 다시 쓰려던 연결을 서버가 닫은 경우)은 GET 같은 멱등 요청만 한 번 다시 보낸다.
+    // 예전 JDK 클라이언트도 그렇게 했다. 429·503 응답을 받고 다시 보내는 것은 끈다 — 사용자가 받은 응답을 그대로 보여 준다.
+    private static final DefaultHttpRequestRetryStrategy CONNECTION_ONLY_RETRY_STRATEGY =
+            new DefaultHttpRequestRetryStrategy(1, TimeValue.ofSeconds(1)) {
+                @Override
+                public boolean retryRequest(
+                        org.apache.hc.core5.http.HttpResponse response,
+                        int execCount,
+                        HttpContext context
+                ) {
+                    return false;
+                }
+            };
+
+    static final DnsResolver GUARDED_DNS_RESOLVER = new SystemDefaultDnsResolver() {
+        @Override
+        public InetAddress[] resolve(String host) throws UnknownHostException {
+            try {
+                return SsrfGuard.resolveAllowed(host);
+            } catch (IllegalArgumentException e) {
+                throw new UnknownHostException("blocked target address: " + host + " (" + e.getMessage() + ")");
+            }
+        }
+    };
+
+    private static final DefaultRedirectStrategy GUARDED_REDIRECT_STRATEGY = new DefaultRedirectStrategy() {
+        @Override
+        public URI getLocationURI(
+                org.apache.hc.core5.http.HttpRequest request,
+                org.apache.hc.core5.http.HttpResponse response,
+                HttpContext context
+        ) throws HttpException {
+            URI location = super.getLocationURI(request, response, context);
+            // Location 이 "/api/..." 처럼 상대 경로로 오면 지금 요청 주소를 기준으로 풀어서 본다.
+            URI target;
+            try {
+                target = location.isAbsolute() ? location : request.getUri().resolve(location);
+            } catch (java.net.URISyntaxException e) {
+                throw new ProtocolException("invalid redirect location: " + location);
+            }
+            try {
+                SsrfGuard.validateTargetUrl(target.toString());
+            } catch (IllegalArgumentException e) {
+                throw new ProtocolException("blocked redirect: " + target + " (" + e.getMessage() + ")");
+            }
+            return location;
+        }
+    };
 
     public ProxyResponse forward(ProxyRequest req) {
         long startNs = System.nanoTime();
